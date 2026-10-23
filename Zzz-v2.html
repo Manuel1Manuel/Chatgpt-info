@@ -1960,58 +1960,6 @@ function gzDrawMetalWall(x,y,n,h){
   gzCtx.fillStyle='#d0d8d7';
   for(const p of [[3,3],[s-5,3],[3,s-5],[s-5,s-5]])gzCtx.fillRect(x+p[0],y+p[1],1,1);
 }
-function gzCoreAnchor(tileX,tileY,id){
-  const same=(tx,ty)=>{
-    if(!gzMap||tx<0||ty<0||tx>=gzMap.width||ty>=gzMap.height)return false;
-    return gzMap.blockIds[(gzMap.height-1-ty)*gzMap.width+tx]===id;
-  };
-  let left=tileX,right=tileX,top=tileY,bottom=tileY;
-  for(let i=0;i<2&&same(left-1,tileY);i++)left--;
-  for(let i=0;i<2&&same(right+1,tileY);i++)right++;
-  for(let i=0;i<2&&same(tileX,top-1);i++)top--;
-  for(let i=0;i<2&&same(tileX,bottom+1);i++)bottom++;
-  return {x:Math.floor((left+right)/2),y:Math.floor((top+bottom)/2)};
-}
-function gzDrawCore(x,y,h){
-  const s=GZ_TILE,size=s*3,left=x-s+1,top=y-s+1,cx=left+Math.floor(size/2),cy=top+Math.floor(size/2);
-  gzCtx.fillStyle='rgba(0,0,0,.58)';
-  gzCtx.fillRect(left+4,top+6,size-3,size-3);
-  gzCtx.fillStyle='#172129';
-  gzCtx.fillRect(left,top,size-2,size-2);
-  gzCtx.fillStyle='#b9c5c5';
-  gzCtx.fillRect(left+2,top+2,size-6,2);
-  gzCtx.fillRect(left+2,top+2,2,size-6);
-  gzCtx.fillStyle='#465760';
-  gzCtx.fillRect(left+4,top+4,size-10,size-10);
-  gzCtx.fillStyle='#202e37';
-  gzCtx.fillRect(left+6,top+6,size-14,size-14);
-  gzPoly([[left+5,top+8],[left+12,top+5],[cx-3,top+9],[cx-6,cy-2],[cx-12,top+13]],'#aebbb9');
-  gzPoly([[left+size-6,top+8],[left+size-13,top+5],[cx+3,top+9],[cx+6,cy-2],[cx+12,top+13]],'#d4d9d4');
-  gzPoly([[left+5,top+size-8],[left+12,top+size-5],[cx-3,cy+3],[cx-6,top+size-13],[left+12,top+size-13]],'#6c7a7d');
-  gzPoly([[left+size-6,top+size-8],[left+size-13,top+size-5],[cx+3,cy+3],[cx+6,top+size-13],[left+size-12,top+size-13]],'#7b898a');
-  gzPoly([[cx-4,top+7],[cx+4,top+7],[cx+7,top+13],[cx+4,top+17],[cx-4,top+17],[cx-7,top+13]],'#d89441');
-  gzCtx.fillStyle='#f0c26c';
-  gzCtx.fillRect(cx-2,top+9,4,7);
-  gzCtx.fillStyle='#1a252e';
-  gzCtx.fillRect(cx-8,cy-7,16,16);
-  gzCtx.fillStyle='#9baeb0';
-  gzCtx.fillRect(cx-6,cy-5,12,12);
-  gzPoly([[cx-5,cy-2],[cx,cy-8],[cx+5,cy-2],[cx+4,cy+4],[cx,cy+8],[cx-4,cy+4]],'#40aabd');
-  gzPoly([[cx-3,cy-2],[cx,cy-6],[cx+2,cy-1],[cx+1,cy+3],[cx-2,cy+4]],'#c0f5ed');
-  gzCtx.fillStyle='#edb85d';
-  gzCtx.fillRect(cx-14,cy-2,5,4);
-  gzCtx.fillRect(cx+9,cy-2,5,4);
-  gzCtx.fillRect(cx-2,cy-14,4,5);
-  gzCtx.fillRect(cx-2,cy+9,4,5);
-  gzCtx.fillStyle='#25333a';
-  for(const p of [[left+4,top+4],[left+size-7,top+4],[left+4,top+size-7],[left+size-7,top+size-7]]){
-    gzCtx.fillRect(p[0],p[1],2,2);
-    gzCtx.fillStyle='#dbe4dd';
-    gzCtx.fillRect(p[0],p[1],1,1);
-    gzCtx.fillStyle='#25333a';
-  }
-  if((h&1)===0){gzCtx.fillStyle='#ffe08a';gzCtx.fillRect(cx+4,cy-1,1,1);}
-}
 function gzDrawBuilding(x,y,n,h){
   const s=GZ_TILE,copper=/copper/.test(n),purple=/thorium/.test(n),blue=/titanium|silicon/.test(n);
   const accent=copper?'#e39a53':purple?'#ca8add':blue?'#79d1dd':'#b6c3c6';
