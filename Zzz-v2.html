@@ -1366,6 +1366,7 @@ function chooseSectorAt(x,y){
     if(item.depth<-.025)continue;
     if(item.sector.key&&(item.sector.state==='capturable'||item.sector.state==='captured')&&pointInPolygon({x,y},item.polygon)){
       selectSector(item.sector.name,item.sector.state,item.sector.key);
+      if(item.sector.key==='ground-zero')openGroundZeroGame();
       return;
     }
   }
