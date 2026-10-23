@@ -1,0 +1,421 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mindustry · Ground Zero – Tile Viewer</title>
+<style>
+:root{color-scheme:dark;--bg:#11161b;--panel:#1b232b;--panel2:#202b34;--line:#35424c;--text:#e9f0f3;--muted:#a9bac3;--accent:#d7ef79;--danger:#ff9e81}
+*{box-sizing:border-box}
+body{margin:0;background:radial-gradient(ellipse at top,#1c2a31 0,#11161b 55%);color:var(--text);font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;min-height:100vh}
+header{padding:20px clamp(14px,3vw,34px) 14px;border-bottom:1px solid var(--line);background:#111820e8}
+.kicker{text-transform:uppercase;letter-spacing:.18em;font-size:10px;color:var(--accent);font-weight:800}
+h1{font-size:clamp(23px,3.3vw,35px);line-height:1.12;margin:5px 0 8px;letter-spacing:-.035em}
+.sub{color:var(--muted);max-width:850px;margin:0}
+main{padding:16px clamp(10px,2vw,24px) 30px;max-width:1500px;margin:auto}
+.toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px;margin-bottom:12px}
+button,.file-label,select{border:1px solid #45545f;border-radius:8px;background:var(--panel2);color:var(--text);padding:8px 11px;font:inherit;cursor:pointer}
+button:hover,.file-label:hover{border-color:var(--accent)}
+button:focus-visible,.file-label:focus-within,select:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+#fileInput{display:none}.file-label{display:inline-flex;align-items:center;gap:7px}
+label.ctrl{display:flex;align-items:center;gap:7px;color:var(--muted);margin-left:3px}select{padding:7px 9px}
+#zoomRange{width:118px;accent-color:var(--accent)}
+.status{margin-left:auto;color:var(--muted);font-size:12px;min-width:140px;text-align:right}
+.layout{display:grid;grid-template-columns:minmax(0,1fr) 260px;gap:12px;align-items:start}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden;min-width:0}
+.panel-head{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 13px;border-bottom:1px solid var(--line);background:#192128}
+.panel-head h2{font-size:13px;margin:0;letter-spacing:.03em}
+.panel-head small{color:var(--muted)}
+.viewport{height:min(72vh,820px);min-height:390px;overflow:auto;background:#0c1116;position:relative;overscroll-behavior:contain;scrollbar-color:#42525e #141b21;cursor:grab}
+.viewport.dragging{cursor:grabbing;user-select:none}
+#mapCanvas{display:block;image-rendering:pixelated;image-rendering:crisp-edges;max-width:none;max-height:none;touch-action:pan-x pan-y}
+.placeholder{display:grid;place-content:center;min-height:390px;height:100%;padding:24px;text-align:center;color:var(--muted);gap:10px}
+.placeholder strong{font-size:18px;color:var(--text)}
+.side{display:grid;gap:12px}
+.side-body{padding:13px}
+.statgrid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.stat{border:1px solid var(--line);border-radius:8px;padding:9px;background:#161e25;min-width:0}
+.stat .value{font-size:20px;font-weight:800;line-height:1.2;color:var(--accent);font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.stat .label{font-size:11px;color:var(--muted);margin-top:3px}
+#tileInfo{font-size:12px;color:var(--muted);line-height:1.55;min-height:95px;overflow-wrap:anywhere}
+#tileInfo b{color:var(--text)}
+.legend{display:grid;grid-template-columns:1fr 1fr;gap:8px 10px;font-size:11px;color:var(--muted)}
+.legendItem{display:flex;align-items:center;gap:7px;min-width:0}.swatch{display:inline-block;flex:0 0 13px;width:13px;height:13px;border-radius:3px;border:1px solid #87939a66}
+.note{font-size:11px;color:var(--muted);margin:0}.source{font-size:12px;color:var(--muted);padding:12px 2px 0;overflow-wrap:anywhere}.source a{color:#d7ef79}
+.error{color:var(--danger);white-space:pre-wrap;max-width:700px;margin:auto}
+#loading{color:var(--accent)}
+@media(max-width:900px){.layout{grid-template-columns:1fr}.side{grid-template-columns:repeat(2,minmax(0,1fr))}.viewport{height:68vh;min-height:340px}.status{width:100%;margin:0;text-align:left}}
+@media(max-width:520px){.side{grid-template-columns:1fr}.toolbar{gap:6px}.toolbar button,.file-label{padding:7px 9px}#zoomRange{width:95px}.viewport{min-height:300px;height:58vh}}
+</style>
+</head>
+<body>
+<header>
+  <div class="kicker">Mindustry · Serpulo</div>
+  <h1>Ground Zero — Tile Viewer</h1>
+  <p class="sub">Kachelpositionen und gespeicherte IDs werden direkt aus der originalen <code>groundZero.msav</code> gelesen. Die Darstellung ist eine stilisierte Pixelansicht und verwendet nicht den originalen Mindustry-Spriteatlas.</p>
+</header>
+<main>
+  <section class="toolbar" aria-label="Ansichtseinstellungen">
+    <button id="reloadBtn" type="button">Originalkarte laden</button>
+    <label class="file-label" for="fileInput">Eigene .msav öffnen</label>
+    <input id="fileInput" type="file" accept=".msav,application/octet-stream">
+    <label class="ctrl" for="layerSelect">Ebene
+      <select id="layerSelect"><option value="combined">Boden + Wände</option><option value="floor">Nur Boden / Erze</option><option value="blocks">Nur Blöcke</option></select>
+    </label>
+    <button id="minusBtn" type="button" aria-label="Verkleinern">−</button>
+    <input id="zoomRange" type="range" min="0.25" max="1.5" step="0.05" value="0.65" aria-label="Zoom">
+    <button id="plusBtn" type="button" aria-label="Vergrößern">+</button>
+    <button id="fitBtn" type="button">Einpassen</button>
+    <div id="status" class="status" role="status" aria-live="polite">Warte auf Karte…</div>
+  </section>
+
+  <div class="layout">
+    <section class="panel" aria-label="Kartenansicht">
+      <div class="panel-head"><h2>Original-Kachelraster</h2><small id="mapDimensions">— × —</small></div>
+      <div id="viewport" class="viewport">
+        <div id="placeholder" class="placeholder"><strong id="loading">Lade Ground Zero…</strong><span>Die originale Karte wird eingelesen und Kachel für Kachel gerendert.</span></div>
+        <canvas id="mapCanvas" hidden aria-label="Mindustry Ground Zero Kachelkarte"></canvas>
+      </div>
+    </section>
+
+    <aside class="side">
+      <section class="panel">
+        <div class="panel-head"><h2>Karteninfo</h2></div>
+        <div class="side-body"><div class="statgrid">
+          <div class="stat"><div class="value" id="statWidth">—</div><div class="label">Breite (Tiles)</div></div>
+          <div class="stat"><div class="value" id="statHeight">—</div><div class="label">Höhe (Tiles)</div></div>
+          <div class="stat"><div class="value" id="statTiles">—</div><div class="label">Gesamtkacheln</div></div>
+          <div class="stat"><div class="value" id="statVersion">—</div><div class="label">Save-Version</div></div>
+        </div></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head"><h2>Ausgewählte Kachel</h2><small>Zeiger auf Karte</small></div>
+        <div class="side-body"><div id="tileInfo">Bewege den Mauszeiger über eine Kachel, um ihre Koordinaten und gespeicherten Inhalte zu sehen.</div></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head"><h2>Stilisierte Legende</h2></div>
+        <div class="side-body"><div class="legend">
+          <div class="legendItem"><i class="swatch" style="background:#555f63"></i>Stein / Fels</div>
+          <div class="legendItem"><i class="swatch" style="background:#8a795c"></i>Sand / Erde</div>
+          <div class="legendItem"><i class="swatch" style="background:#365f4b"></i>Gras / Moos</div>
+          <div class="legendItem"><i class="swatch" style="background:#28516a"></i>Wasser</div>
+          <div class="legendItem"><i class="swatch" style="background:#a96742"></i>Heiße Böden</div>
+          <div class="legendItem"><i class="swatch" style="background:#c98744"></i>Kupfererz</div>
+          <div class="legendItem"><i class="swatch" style="background:#b7c1c6"></i>Bleierz</div>
+          <div class="legendItem"><i class="swatch" style="background:#9d80ce"></i>Thoriumerz</div>
+        </div></div>
+      </section>
+      <section class="panel">
+        <div class="panel-head"><h2>Hinweis</h2></div>
+        <div class="side-body"><p class="note">Der Kartenparser folgt dem offenen Mindustry-Saveformat. Die HTML-Datei lädt standardmäßig die Originaldatei von GitHub; alternativ kannst du eine lokale .msav-Datei auswählen. Die Darstellung bildet Boden, Erz-Overlays und Block-IDs ab, aber nicht die exakten Original-Sprites und Animationen.</p></div>
+      </section>
+    </aside>
+  </div>
+  <div class="source">Quelle: <a href="https://github.com/Anuken/Mindustry/blob/master/core/assets/maps/serpulo/groundZero.msav" target="_blank" rel="noopener">Anuken/Mindustry · groundZero.msav</a> · Parser-Grundlage: <a href="https://github.com/Anuken/Mindustry/blob/master/core/src/mindustry/io/SaveVersion.java" target="_blank" rel="noopener">SaveVersion.java</a> und <a href="https://github.com/Anuken/Mindustry/blob/master/core/src/mindustry/io/SaveFileReader.java" target="_blank" rel="noopener">SaveFileReader.java</a>.</div>
+</main>
+<script>
+(function(){
+'use strict';
+const SOURCE_URL = 'https://raw.githubusercontent.com/Anuken/Mindustry/master/core/assets/maps/serpulo/groundZero.msav';
+const TILE = 8;
+const $ = function(id){ return document.getElementById(id); };
+const canvas = $('mapCanvas'), ctx = canvas.getContext('2d', {alpha:false});
+const viewport = $('viewport');
+let currentMap = null;
+let zoom = 0.65;
+let activeLayer = 'combined';
+let dragState = null;
+
+class Reader{
+  constructor(bytes, start, end){ this.bytes=bytes; this.pos=start||0; this.end=(end===undefined)?bytes.length:end; }
+  need(n){ if(n<0 || this.pos+n>this.end) throw new Error('Unerwartetes Dateiende beim Lesen der .msav-Datei (Offset '+this.pos+').'); }
+  u8(){ this.need(1); return this.bytes[this.pos++]; }
+  i8(){ const v=this.u8(); return v>127?v-256:v; }
+  u16(){ return (this.u8()<<8)|this.u8(); }
+  i16(){ const v=this.u16(); return v>32767?v-65536:v; }
+  i32(){ return (this.u8()*0x1000000)+(this.u8()<<16)+(this.u8()<<8)+this.u8(); }
+  skip(n){ this.need(n); this.pos+=n; }
+  utf(){
+    const n=this.u16(); this.need(n);
+    const part=this.bytes.subarray(this.pos,this.pos+n); this.pos+=n;
+    return new TextDecoder('utf-8').decode(part).replace(/\u0000/g,'');
+  }
+  region(){
+    const n=this.i32();
+    if(n<0 || this.pos+n>this.end) throw new Error('Ungültige Region-Länge im Savefile: '+n+'.');
+    const start=this.pos;
+    this.pos+=n;
+    return new Reader(this.bytes,start,start+n);
+  }
+  chunkSkip(){ const n=this.i32(); if(n<0) throw new Error('Ungültige Chunk-Länge.'); this.skip(n); }
+}
+
+async function inflateMsav(fileBytes){
+  if(!('DecompressionStream' in window)) throw new Error('Dieser Browser unterstützt DecompressionStream nicht. Bitte verwende einen aktuellen Chrome, Edge oder Safari.');
+  const ds = new DecompressionStream('deflate');
+  const stream = new Blob([fileBytes]).stream().pipeThrough(ds);
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+
+function parseContentHeader(r){
+  const mapped=r.u8();
+  let blockNames=[];
+  for(let i=0;i<mapped;i++){
+    const type=r.i8();
+    const total=r.u16();
+    const names=[];
+    for(let j=0;j<total;j++) names.push(r.utf());
+    if(type===1) blockNames=names;
+  }
+  return blockNames;
+}
+function parseMapRegion(r, blockNames, version){
+  const width=r.u16(), height=r.u16(), count=width*height;
+  if(!width || !height || count>2000000) throw new Error('Ungültige Kartengröße: '+width+' × '+height+'.');
+  const floorIds=new Int32Array(count), overlayIds=new Int32Array(count), blockIds=new Int32Array(count);
+  for(let i=0;i<count;i++){
+    const floor=r.i16(), overlay=r.i16(), repeat=r.u8();
+    floorIds[i]=floor; overlayIds[i]=overlay;
+    for(let j=1;j<=repeat && i+j<count;j++){ floorIds[i+j]=floor; overlayIds[i+j]=overlay; }
+    i+=repeat;
+  }
+  for(let i=0;i<count;i++){
+    const id=r.i16();
+    const packed=r.u8();
+    const hasEntity=(packed&1)!==0;
+    const hasData=(packed&4)!==0;
+    if(hasData) r.skip(7);
+    let isCenter=true;
+    if(hasEntity) isCenter=(r.u8()!==0);
+    blockIds[i]=id;
+    if(hasEntity && isCenter) r.chunkSkip();
+    if(!hasEntity && !hasData){
+      const repeat=r.u8();
+      for(let j=1;j<=repeat && i+j<count;j++) blockIds[i+j]=id;
+      i+=repeat;
+    }
+  }
+  return {width:width,height:height,version:version,floorIds:floorIds,overlayIds:overlayIds,blockIds:blockIds,blockNames:blockNames};
+}
+function parseMsav(raw){
+  const r=new Reader(raw,0,raw.length);
+  const head=String.fromCharCode(r.u8(),r.u8(),r.u8(),r.u8());
+  if(head!=='MSAV') throw new Error('Die Datei hat keinen MSAV-Header. Ist es wirklich eine Mindustry-.msav-Datei?');
+  const version=r.i32();
+  if(version<11 || version>13) throw new Error('Save-Version '+version+' wird hier noch nicht unterstützt (unterstützt: 11–13).');
+  r.region(); // meta
+  let blockNames;
+  if(version===11){
+    blockNames=parseContentHeader(r.region());
+    r.region(); // legacy data patches
+  }else{
+    r.region(); // data patches
+    blockNames=parseContentHeader(r.region());
+  }
+  const map=parseMapRegion(r.region(),blockNames,version);
+  map.source='Mindustry .msav';
+  return map;
+}
+function nameFor(id){
+  if(!currentMap) return '—';
+  return currentMap.blockNames[id] || (id===-1?'(keine ID)':'Unbekannte ID '+id);
+}
+function hash(x,y,id){
+  let n=(Math.imul(x+11,374761393)+Math.imul(y+47,668265263)+Math.imul(id+5,1442695041))|0;
+  n=Math.imul(n^(n>>>13),1274126177); return (n^(n>>>16))>>>0;
+}
+function shade(hex, amount){
+  const h=hex.replace('#','');
+  const r=parseInt(h.slice(0,2),16), g=parseInt(h.slice(2,4),16), b=parseInt(h.slice(4,6),16);
+  const f=function(v){return Math.max(0,Math.min(255,Math.round(v+amount))).toString(16).padStart(2,'0');};
+  return '#'+f(r)+f(g)+f(b);
+}
+function floorColor(name){
+  const n=(name||'').toLowerCase();
+  if(/deep-water|deepwater|water|tainted-water|cryofluid/.test(n)) return '#28516a';
+  if(/slag|molten|magmarock|hotrock|magma/.test(n)) return '#874a32';
+  if(/grass|moss|spore/.test(n)) return '#365b46';
+  if(/sand|dune|dirt|regolith|salt/.test(n)) return '#8a795c';
+  if(/ice|snow|frost/.test(n)) return '#7796a5';
+  if(/dacite|basalt|shale/.test(n)) return '#454b52';
+  if(/tar/.test(n)) return '#453842';
+  if(/stone|rock|crater/.test(n)) return '#555f63';
+  if(/arkycite|rhyolite/.test(n)) return '#675b75';
+  return '#4a555b';
+}
+function oreColor(name){
+  const n=(name||'').toLowerCase();
+  if(!n || n==='air' || !n.includes('ore-')) return null;
+  if(n.includes('copper')) return '#c98744';
+  if(n.includes('lead')) return '#bac4c9';
+  if(n.includes('titanium')) return '#63c2d4';
+  if(n.includes('thorium')) return '#ac82dc';
+  if(n.includes('coal')) return '#303643';
+  if(n.includes('scrap')) return '#9fa6a5';
+  if(n.includes('beryllium')) return '#72b77b';
+  if(n.includes('tungsten')) return '#c0b8a6';
+  if(n.includes('oxide')) return '#dd8067';
+  if(n.includes('carbide')) return '#8f7cbb';
+  return '#c9bd91';
+}
+function isAir(name,id){ return id===0 || !name || name.toLowerCase()==='air'; }
+function isNaturalBlock(name){
+  return /(wall|rock|rocks|boulder|cliff|tree|pine|shale|stalagmite|spore-cluster|crater|sand-boulder|ice-boulder|snow-boulder)/.test((name||'').toLowerCase());
+}
+function drawFloor(x,y,id,overlay){
+  const floorName=nameFor(id), base=floorColor(floorName), px=x*TILE, py=y*TILE;
+  const h=hash(x,y,id);
+  ctx.fillStyle=base; ctx.fillRect(px,py,TILE,TILE);
+  const n=(floorName||'').toLowerCase();
+  if(/water|cryofluid/.test(n)){
+    ctx.fillStyle=shade(base,18+(h%13)); ctx.fillRect(px+1+(h%3),py+2+(h%4),3,1);
+    if((h&7)===0){ctx.fillStyle=shade(base,-13);ctx.fillRect(px+4,py+6,2,1);}
+  }else if(/hotrock|magma|slag/.test(n)){
+    ctx.fillStyle='#d2793e';ctx.fillRect(px+1+(h%4),py+1+((h>>>4)%5),1,1);
+    ctx.fillStyle='#ad5030';ctx.fillRect(px+5,py+4,2,1);
+  }else{
+    const dots=2+(h%4);
+    for(let k=0;k<dots;k++){
+      const d=hash(x+k+1,y+k+2,id+k);
+      ctx.fillStyle=shade(base,((d&1)?1:-1)*(9+((d>>>4)%20)));
+      ctx.fillRect(px+((d>>>8)%(TILE-1)),py+((d>>>16)%(TILE-1)),1+(d%5===0?1:0),1);
+    }
+    if(/stone|basalt|dacite|shale|rock/.test(n) && (h%3===0)){
+      ctx.fillStyle=shade(base,-16);ctx.fillRect(px+1,py+5,3,1);
+    }
+  }
+  const ore=oreColor(nameFor(overlay));
+  if(ore){
+    ctx.fillStyle=ore;
+    ctx.fillRect(px+1+((h>>>3)%4),py+1+((h>>>9)%5),2,2);
+    ctx.fillRect(px+4,py+4+((h>>>13)%3),2,1);
+    if((h&3)===0)ctx.fillRect(px+2,py+6,1,1);
+  }
+}
+function drawBlock(x,y,id){
+  const name=nameFor(id), n=(name||'').toLowerCase();
+  if(isAir(n,id)) return;
+  const px=x*TILE,py=y*TILE,h=hash(x,y,id);
+  if(isNaturalBlock(n)){
+    let base='#596164';
+    if(/sand|dune|dirt/.test(n)) base='#817056';
+    else if(/ice|snow/.test(n)) base='#7895a2';
+    else if(/spore/.test(n)) base='#4d6b50';
+    else if(/basalt|shale/.test(n)) base='#3d424a';
+    else if(/tree|pine/.test(n)) base='#345c45';
+    ctx.fillStyle=base;ctx.fillRect(px,py,TILE,TILE);
+    ctx.fillStyle=shade(base,20);ctx.fillRect(px+1,py+1,5,1);ctx.fillRect(px+1,py+1,1,5);
+    ctx.fillStyle=shade(base,-18);ctx.fillRect(px+2,py+6,5,1);ctx.fillRect(px+6,py+2,1,5);
+    ctx.fillStyle=shade(base,(h&1)?-12:12);ctx.fillRect(px+2+(h%3),py+2+((h>>>4)%3),2,2);
+  }else if(/core/.test(n)){
+    ctx.fillStyle='#3c4b51';ctx.fillRect(px,py,TILE,TILE);
+    ctx.fillStyle='#d7ef79';ctx.fillRect(px+2,py+1,4,6);ctx.fillStyle='#7c8d46';ctx.fillRect(px+3,py+2,2,4);
+  }else{
+    ctx.fillStyle='#66737a';ctx.fillRect(px,py,TILE,TILE);
+    ctx.fillStyle='#9aa6ab';ctx.fillRect(px+1,py+1,6,1);ctx.fillRect(px+1,py+1,1,6);
+    ctx.fillStyle='#35424a';ctx.fillRect(px+2,py+3,4,3);
+    ctx.fillStyle=(h&1)?'#d0dbdf':'#87969d';ctx.fillRect(px+3,py+3,2,2);
+  }
+}
+function render(){
+  if(!currentMap) return;
+  const m=currentMap, w=m.width,h=m.height,count=w*h;
+  canvas.width=w*TILE;canvas.height=h*TILE;
+  ctx.imageSmoothingEnabled=false;
+  for(let i=0;i<count;i++){
+    const x=i%w, worldY=Math.floor(i/w), screenY=h-1-worldY;
+    if(activeLayer==='blocks'){
+      ctx.fillStyle='#161d23';ctx.fillRect(x*TILE,screenY*TILE,TILE,TILE);
+      drawBlock(x,screenY,m.blockIds[i]);
+    }else{
+      drawFloor(x,screenY,m.floorIds[i],m.overlayIds[i]);
+      if(activeLayer==='combined') drawBlock(x,screenY,m.blockIds[i]);
+    }
+  }
+  applyZoom();
+}
+function applyZoom(){
+  if(!currentMap) return;
+  canvas.style.width=(currentMap.width*TILE*zoom)+'px';
+  canvas.style.height=(currentMap.height*TILE*zoom)+'px';
+  $('zoomRange').value=String(zoom);
+}
+function populateInfo(m){
+  $('statWidth').textContent=m.width;
+  $('statHeight').textContent=m.height;
+  $('statTiles').textContent=(m.width*m.height).toLocaleString('de-DE');
+  $('statVersion').textContent=m.version;
+  $('mapDimensions').textContent=m.width+' × '+m.height+' Tiles';
+  $('tileInfo').innerHTML='Bewege den Mauszeiger über die Karte, um <b>X/Y</b>, Boden, Erz-Overlay und Block der exakten Kachel zu sehen.';
+}
+function setStatus(msg){ $('status').textContent=msg; }
+function showError(err){
+  $('placeholder').hidden=false;$('mapCanvas').hidden=true;
+  $('placeholder').innerHTML='<div class="error"><strong>Die Karte konnte nicht gelesen werden.</strong><br><br>'+escapeHTML(err && err.message ? err.message : String(err))+'<br><br>Du kannst oben „Eigene .msav öffnen“ auswählen und die Originaldatei lokal laden. Falls GitHub das Laden blockiert, löst das den CORS-Fallback aus.</div>';
+  setStatus('Laden fehlgeschlagen');
+}
+function escapeHTML(s){return String(s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
+async function loadBytes(bytes, sourceLabel){
+  setStatus('Dekomprimiere…');
+  const raw=await inflateMsav(bytes);
+  setStatus('Lese Kachel-IDs…');
+  const parsed=parseMsav(raw);
+  parsed.source=sourceLabel;
+  currentMap=parsed;
+  $('placeholder').hidden=true;
+  $('mapCanvas').hidden=false;
+  populateInfo(parsed);
+  render();
+  setStatus('Karte bereit · '+sourceLabel);
+}
+async function loadOfficial(){
+  setStatus('Lade Originaldatei…');
+  $('placeholder').hidden=false;
+  $('placeholder').innerHTML='<strong id="loading">Lade Ground Zero…</strong><span>Quelle: offizielles Mindustry-Repository</span>';
+  $('mapCanvas').hidden=true;
+  try{
+    const res=await fetch(SOURCE_URL,{cache:'no-store'});
+    if(!res.ok) throw new Error('GitHub antwortete mit HTTP '+res.status+'.');
+    await loadBytes(new Uint8Array(await res.arrayBuffer()),'offizielle groundZero.msav');
+  }catch(err){showError(err);}
+}
+$('reloadBtn').addEventListener('click',loadOfficial);
+$('fileInput').addEventListener('change',async function(ev){
+  const file=ev.target.files && ev.target.files[0]; if(!file) return;
+  setStatus('Lese lokale Datei…');
+  try{await loadBytes(new Uint8Array(await file.arrayBuffer()),file.name);}catch(err){showError(err);}
+  ev.target.value='';
+});
+$('layerSelect').addEventListener('change',function(ev){activeLayer=ev.target.value;render();});
+$('zoomRange').addEventListener('input',function(ev){zoom=Number(ev.target.value);applyZoom();});
+$('minusBtn').addEventListener('click',function(){zoom=Math.max(.25,Math.round((zoom-.1)*100)/100);applyZoom();});
+$('plusBtn').addEventListener('click',function(){zoom=Math.min(1.5,Math.round((zoom+.1)*100)/100);applyZoom();});
+$('fitBtn').addEventListener('click',function(){
+  if(!currentMap) return;
+  const availableW=Math.max(260,viewport.clientWidth-28), availableH=Math.max(240,viewport.clientHeight-28);
+  zoom=Math.max(.25,Math.min(1.5,Math.min(availableW/(currentMap.width*TILE),availableH/(currentMap.height*TILE))));
+  applyZoom();viewport.scrollTop=0;viewport.scrollLeft=0;
+});
+canvas.addEventListener('pointermove',function(ev){
+  if(!currentMap) return;
+  if(dragState && ev.buttons){
+    viewport.scrollLeft=dragState.left+(dragState.x-ev.clientX);
+    viewport.scrollTop=dragState.top+(dragState.y-ev.clientY);
+  }
+  const rect=canvas.getBoundingClientRect();
+  const x=Math.floor((ev.clientX-rect.left)/rect.width*currentMap.width);
+  const sy=Math.floor((ev.clientY-rect.top)/rect.height*currentMap.height);
+  if(x<0||x>=currentMap.width||sy<0||sy>=currentMap.height) return;
+  const y=currentMap.height-1-sy, i=y*currentMap.width+x;
+  $('tileInfo').innerHTML='<b>Koordinaten:</b> '+x+', '+y+'<br><b>Boden:</b> '+escapeHTML(nameFor(currentMap.floorIds[i]))+' <span style="opacity:.7">(ID '+currentMap.floorIds[i]+')</span><br><b>Overlay:</b> '+escapeHTML(nameFor(currentMap.overlayIds[i]))+' <span style="opacity:.7">(ID '+currentMap.overlayIds[i]+')</span><br><b>Block:</b> '+escapeHTML(nameFor(currentMap.blockIds[i]))+' <span style="opacity:.7">(ID '+currentMap.blockIds[i]+')</span>';
+});
+canvas.addEventListener('pointerdown',function(ev){dragState={x:ev.clientX,y:ev.clientY,left:viewport.scrollLeft,top:viewport.scrollTop};viewport.classList.add('dragging');});
+window.addEventListener('pointerup',function(){dragState=null;viewport.classList.remove('dragging');});
+canvas.addEventListener('pointerleave',function(){if(!dragState)$('tileInfo').innerHTML='Bewege den Mauszeiger über die Karte, um <b>X/Y</b>, Boden, Erz-Overlay und Block der exakten Kachel zu sehen.';});
+loadOfficial();
+})();
+</script>
+</body>
+</html>
