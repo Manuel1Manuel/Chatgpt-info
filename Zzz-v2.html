@@ -1,0 +1,1965 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#070611">
+<title>Mindustry – Serpulo</title>
+<style>
+:root{
+  --bg:#2c2c34;
+  --bg2:#35353f;
+  --ore-purple:#7e6bb5;
+  --ore-purple2:#9c89cf;
+  --ore-orange:#e2884f;
+  --text:#eef0f2;
+  --muted:#9a9aa8;
+  --accent:#f2c14e;
+  --accent2:#e2884f;
+  --panel:rgba(14,14,18,.55);
+  --panel-strong:rgba(10,10,14,.88);
+  --btn-hover:rgba(255,255,255,.08);
+  --btn-active:rgba(255,255,255,.16);
+  --border:rgba(255,255,255,.08);
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{
+  font-family:"Segoe UI",system-ui,Arial,sans-serif;
+  color:var(--text);
+  overflow:hidden;
+  background-color:var(--bg);
+  background-image:
+    radial-gradient(ellipse 520px 420px at 88% 14%,rgba(226,136,79,.28),transparent 60%),
+    radial-gradient(ellipse 620px 520px at 92% 32%,rgba(126,107,181,.4),transparent 65%),
+    radial-gradient(ellipse 760px 620px at 58% 96%,rgba(126,107,181,.32),transparent 60%),
+    radial-gradient(ellipse 420px 380px at 4% 92%,rgba(126,107,181,.22),transparent 60%),
+    repeating-linear-gradient(45deg,rgba(255,255,255,.03) 0 3px,transparent 3px 11px),
+    linear-gradient(135deg,var(--bg),var(--bg2));
+}
+body::before{
+  content:"";
+  position:fixed;
+  inset:0;
+  pointer-events:none;
+  z-index:0;
+  background-image:
+    repeating-linear-gradient(0deg,rgba(0,0,0,.18) 0 1px,transparent 1px 40px),
+    repeating-linear-gradient(90deg,rgba(0,0,0,.18) 0 1px,transparent 1px 40px);
+}
+body::after{
+  content:"";
+  position:fixed;
+  inset:0;
+  pointer-events:none;
+  z-index:0;
+  opacity:.55;
+  background-image:
+    radial-gradient(3px 3px at 15% 78%,var(--ore-purple),transparent 60%),
+    radial-gradient(3px 3px at 20% 83%,var(--ore-purple2),transparent 60%),
+    radial-gradient(2px 2px at 25% 70%,var(--ore-purple),transparent 60%),
+    radial-gradient(3px 3px at 92% 10%,var(--ore-orange),transparent 60%),
+    radial-gradient(2px 2px at 95% 18%,var(--ore-orange),transparent 60%),
+    radial-gradient(3px 3px at 88% 24%,var(--ore-orange),transparent 60%),
+    radial-gradient(2px 2px at 97% 7%,var(--ore-orange),transparent 60%);
+  background-size:220px 220px;
+}
+button{font:inherit}
+.scene{
+  position:relative;
+  z-index:1;
+  height:100%;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  padding:28px 20px 20px;
+}
+.titlewrap{display:flex;align-items:center;gap:18px;margin-top:10px}
+.chevron{width:0;height:0;filter:drop-shadow(0 2px 2px rgba(0,0,0,.5))}
+.chevron.left{border-top:22px solid transparent;border-bottom:22px solid transparent;border-right:28px solid var(--accent2)}
+.chevron.right{border-top:22px solid transparent;border-bottom:22px solid transparent;border-left:28px solid var(--accent)}
+h1.title{
+  margin:0;
+  font-size:clamp(38px,7vw,72px);
+  font-weight:900;
+  letter-spacing:6px;
+  background:linear-gradient(to bottom,#fff 0%,#d6d6da 42%,#8e8e97 52%,#c7c7cd 100%);
+  -webkit-background-clip:text;
+  background-clip:text;
+  color:transparent;
+  text-shadow:0 3px 0 rgba(0,0,0,.35),0 6px 10px rgba(0,0,0,.4);
+  text-transform:uppercase;
+}
+.build{color:var(--muted);letter-spacing:2px;font-size:13px;margin-top:-4px;text-shadow:0 1px 2px rgba(0,0,0,.6)}
+.menu{margin-top:48px;width:min(360px,80vw);display:flex;flex-direction:column}
+.mbtn{
+  display:flex;
+  align-items:center;
+  gap:16px;
+  background:transparent;
+  border:none;
+  color:var(--text);
+  padding:14px 18px;
+  font-size:17px;
+  font-weight:600;
+  letter-spacing:.3px;
+  cursor:pointer;
+  text-align:left;
+  border-radius:4px;
+  transition:background .12s ease;
+}
+.mbtn:hover{background:var(--btn-hover)}
+.mbtn:active{background:var(--btn-active)}
+.mbtn svg{width:22px;height:22px;flex:none;stroke:var(--text);fill:none;stroke-width:1.8}
+.mbtn .sub{display:block;font-size:12px;font-weight:700;color:var(--accent2);letter-spacing:.5px}
+.mbtn .label{display:flex;flex-direction:column;line-height:1.25}
+.overlay{
+  position:fixed;
+  inset:0;
+  background:rgba(0,0,0,.55);
+  backdrop-filter:blur(2px);
+  display:none;
+  align-items:center;
+  justify-content:center;
+  z-index:20;
+  padding:20px;
+}
+.overlay.show{display:flex}
+.modal{
+  width:min(480px,100%);
+  max-height:80vh;
+  overflow:auto;
+  background:var(--panel-strong);
+  border:1px solid var(--border);
+  border-radius:6px;
+  box-shadow:0 20px 50px rgba(0,0,0,.55);
+}
+.modal-head{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--border)}
+.modal-head h2{margin:0;font-size:18px;letter-spacing:1px;text-transform:uppercase}
+.modal-close{background:none;border:none;color:var(--muted);font-size:20px;cursor:pointer;line-height:1;padding:4px 8px}
+.modal-close:hover{color:var(--text)}
+.modal-body{padding:16px 18px;font-size:14px;color:var(--text);line-height:1.6}
+.row{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border);gap:18px}
+.row:last-child{border-bottom:none}
+.row span.k{color:var(--muted)}
+input[type=range]{width:140px;accent-color:var(--accent2)}
+.toggle{width:40px;height:22px;background:#444;border-radius:12px;position:relative;cursor:pointer;flex:none}
+.toggle.on{background:var(--accent2)}
+.toggle::after{content:"";position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:#fff;transition:left .15s}
+.toggle.on::after{left:20px}
+.toast{
+  position:fixed;
+  left:50%;
+  bottom:max(30px,env(safe-area-inset-bottom));
+  transform:translateX(-50%) translateY(20px);
+  max-width:calc(100vw - 32px);
+  background:var(--panel-strong);
+  border:1px solid var(--border);
+  color:var(--text);
+  padding:10px 18px;
+  border-radius:5px;
+  font-size:13px;
+  text-align:center;
+  opacity:0;
+  transition:all .25s ease;
+  z-index:40;
+  pointer-events:none;
+}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+.screen{
+  position:fixed;
+  inset:0;
+  z-index:15;
+  display:none;
+  flex-direction:column;
+  align-items:center;
+  overflow:hidden;
+  isolation:isolate;
+  padding:28px 20px 20px;
+}
+.screen.show{display:flex}
+.backlink{
+  align-self:flex-start;
+  background:none;
+  border:none;
+  color:var(--muted);
+  font-size:14px;
+  cursor:pointer;
+  display:flex;
+  align-items:center;
+  gap:6px;
+  margin-bottom:4px;
+  padding:4px 0;
+}
+.backlink:hover{color:var(--text)}
+.playgrid{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;width:min(360px,86vw);margin-top:36px}
+.pbtn{
+  background:#141418;
+  border:1px solid var(--border);
+  border-radius:10px;
+  padding:22px 10px;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  gap:10px;
+  cursor:pointer;
+  color:var(--text);
+  font-size:13.5px;
+  font-weight:700;
+  text-align:center;
+  line-height:1.3;
+  transition:background .12s,transform .1s;
+}
+.pbtn:hover{background:#1d1d24}
+.pbtn:active{transform:scale(.97)}
+.pbtn svg{width:26px;height:26px;stroke:var(--text);fill:none;stroke-width:1.8}
+#scr-sectors{
+  justify-content:center;
+  background:
+    radial-gradient(ellipse 65% 50% at 50% 43%,rgba(47,28,88,.5),transparent 76%),
+    radial-gradient(ellipse at 50% 18%,#100a24 0%,#080613 55%,#030207 100%);
+  padding:0;
+}
+#scr-sectors::before{
+  content:"";
+  position:absolute;
+  inset:0;
+  pointer-events:none;
+  z-index:0;
+  opacity:.55;
+  background-image:
+    radial-gradient(1.5px 1.5px at 10% 20%,#fff,transparent 60%),
+    radial-gradient(1px 1px at 30% 65%,#fff,transparent 60%),
+    radial-gradient(1.5px 1.5px at 70% 15%,#fff,transparent 60%),
+    radial-gradient(1px 1px at 85% 55%,#fff,transparent 60%),
+    radial-gradient(1.5px 1.5px at 50% 85%,#fff,transparent 60%),
+    radial-gradient(1px 1px at 20% 90%,#fff,transparent 60%),
+    radial-gradient(1px 1px at 92% 85%,#fff,transparent 60%);
+  background-size:260px 260px;
+}
+.sector-canvas{position:absolute;inset:0;width:100%;height:100%;z-index:0;touch-action:none;cursor:grab;outline:none}
+.sector-canvas:active{cursor:grabbing}
+.hud-left{
+  position:absolute;
+  top:max(20px,env(safe-area-inset-top));
+  left:max(20px,env(safe-area-inset-left));
+  z-index:3;
+  width:155px;
+  font-size:12px;
+  text-shadow:0 2px 7px #000;
+}
+.hud-left .backlink{margin-bottom:13px;padding:0;color:#aaa5bd}
+.planet-tabs{display:flex;flex-direction:column;align-items:flex-start;gap:4px}
+.ptab{
+  display:flex;
+  align-items:center;
+  gap:7px;
+  color:#a19bad;
+  padding:5px 8px;
+  border:1px solid transparent;
+  background:transparent;
+  font-size:12px;
+  letter-spacing:.3px;
+  cursor:pointer;
+  text-align:left;
+}
+.ptab.active{color:#9be9ee;border-color:rgba(127,227,232,.2);border-bottom-color:#7fe3e8;background:rgba(23,32,53,.45)}
+.pdiff{margin-top:13px;color:#a8a2b5;display:flex;align-items:center;gap:7px;cursor:default;padding:4px 8px;font-size:12px}
+.sector-panel{
+  position:absolute;
+  z-index:4;
+  left:50%;
+  bottom:max(24px,calc(env(safe-area-inset-bottom) + 18px));
+  transform:translateX(-50%);
+  width:min(350px,calc(100vw - 34px));
+  padding:0 16px 13px;
+  background:linear-gradient(180deg,rgba(5,4,12,.86),rgba(3,3,8,.94));
+  border:1px solid rgba(207,178,255,.13);
+  border-top:1px solid rgba(255,204,131,.75);
+  box-shadow:0 14px 34px rgba(0,0,0,.48),0 0 26px rgba(104,59,190,.12);
+  backdrop-filter:blur(9px);
+}
+.sector-panel::before{
+  content:"";
+  position:absolute;
+  left:16px;
+  right:16px;
+  top:0;
+  height:1px;
+  background:linear-gradient(90deg,transparent,rgba(255,206,136,.8),transparent);
+}
+.sector-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:12px 0 8px}
+.sector-title-wrap{min-width:0;display:flex;flex-direction:column;gap:3px}
+.sector-name{font-size:15px;font-weight:750;letter-spacing:.35px;line-height:1.25;overflow-wrap:anywhere}
+.sector-kicker{font-size:9px;letter-spacing:1.6px;text-transform:uppercase;color:#8f849f}
+.sector-index{color:#d6b985;font-size:10px;letter-spacing:1px;white-space:nowrap;padding-top:3px}
+.sector-status{font-size:11px;color:#c5bfce;line-height:1.35;min-height:15px}
+.sector-status.locked{color:#e28e8e}
+.sector-status.capturable{color:#d2bbff}
+.sector-threat{font-size:10px;color:#b7adca;line-height:1.35;margin-top:4px;letter-spacing:.15px}
+.sector-threat[hidden]{display:none}
+.resource-line{display:flex;align-items:center;gap:9px;border-top:1px solid rgba(255,255,255,.08);border-bottom:1px solid rgba(255,255,255,.08);padding:9px 0;margin-top:6px;min-height:39px}
+.resource-label{font-size:10px;color:#a6a0b0;white-space:nowrap;flex:none}
+.resource-icons{display:flex;align-items:center;justify-content:flex-start;gap:5px;flex:1;min-width:0;flex-wrap:wrap}
+.resource-icon{display:inline-flex;align-items:center;justify-content:center;width:21px;height:21px;flex:none;filter:drop-shadow(0 1px 1px rgba(0,0,0,.7))}
+.resource-icon svg{display:block;width:100%;height:100%;overflow:visible;shape-rendering:crispEdges}
+.panel-actions{display:flex;align-items:center;justify-content:space-between;gap:12px;padding-top:10px}
+.sector-info{min-height:26px;padding:5px 9px;border:1px solid rgba(255,255,255,.19);border-radius:3px;background:rgba(255,255,255,.035);color:#ded8eb;font-size:10px;letter-spacing:.2px;cursor:pointer;white-space:nowrap}
+.sector-info:hover{background:rgba(255,255,255,.1)}
+.sector-info[hidden]{display:none}
+.sbtn{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  gap:9px;
+  min-width:128px;
+  background:linear-gradient(180deg,#f0a45d,#ce783e);
+  border:1px solid rgba(255,218,168,.5);
+  color:#211307;
+  font-weight:800;
+  padding:8px 15px;
+  border-radius:4px;
+  cursor:pointer;
+  font-size:12px;
+  text-shadow:0 1px 0 rgba(255,255,255,.15);
+  box-shadow:0 3px 12px rgba(0,0,0,.3);
+}
+.sbtn:hover{filter:brightness(1.08)}
+.sbtn:active{transform:translateY(1px)}
+.sbtn:disabled{opacity:.4;cursor:not-allowed;filter:grayscale(.65)}
+.sector-count{position:absolute;bottom:18px;left:max(20px,env(safe-area-inset-left));font-size:21px;font-weight:900;letter-spacing:1px;z-index:2;color:rgba(225,216,242,.76);text-shadow:0 2px 10px #000}
+.mini-logo{position:absolute;bottom:17px;right:max(20px,env(safe-area-inset-right));text-align:right;z-index:2;text-shadow:0 2px 10px #000}
+.mini-logo b{font-size:13px;font-weight:900;letter-spacing:1.5px;color:rgba(240,235,250,.82)}
+.mini-logo small{display:block;color:#8e849e;font-size:9px;margin-top:-1px;letter-spacing:1px}
+
+.research-trigger{display:inline-flex;align-items:center;justify-content:center;width:29px;height:29px;padding:5px;border:1px solid rgba(207,178,255,.25);border-radius:3px;background:rgba(125,96,179,.12);color:#e2d4ff;cursor:pointer;flex:none}
+.research-trigger:hover{background:rgba(155,119,220,.24);border-color:rgba(207,178,255,.55)}
+.research-trigger svg{width:17px;height:17px;stroke:currentColor;fill:none;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
+.panel-left-actions{display:flex;align-items:center;gap:7px;min-width:0}
+.research-screen{position:fixed;inset:0;z-index:35;display:none;align-items:center;justify-content:center;padding:clamp(10px,2vw,28px);background:rgba(2,2,7,.83);backdrop-filter:blur(8px)}
+.research-screen.show{display:flex}
+.research-window{width:min(1500px,100%);height:min(920px,96vh);display:flex;flex-direction:column;overflow:hidden;background:linear-gradient(145deg,rgba(21,18,32,.985),rgba(5,5,11,.99));border:1px solid rgba(211,187,255,.22);box-shadow:0 24px 80px rgba(0,0,0,.68),0 0 44px rgba(93,57,165,.16);position:relative}
+.research-header{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:13px 17px;border-bottom:1px solid rgba(255,255,255,.1);background:linear-gradient(90deg,rgba(100,69,145,.17),transparent 55%);flex:none}
+.research-title{min-width:0;display:flex;flex-direction:column;gap:3px}
+.research-title strong{font-size:15px;letter-spacing:2.2px;color:#f1edf8}
+.research-title span{font-size:10px;color:#9b92ad;letter-spacing:.6px}
+.research-header-right{display:flex;align-items:center;gap:10px}
+.research-pool{display:flex;align-items:center;gap:7px;color:#b5adbf;font-size:10px;border:1px solid rgba(255,255,255,.09);padding:7px 9px;background:rgba(0,0,0,.2)}
+.research-pool svg{width:16px;height:16px;stroke:#d1c1ff;fill:none;stroke-width:1.5}
+.research-close{width:31px;height:31px;background:transparent;border:1px solid rgba(255,255,255,.14);color:#bcb4cc;font-size:18px;cursor:pointer}
+.research-close:hover{background:rgba(255,255,255,.08);color:#fff}
+.research-toolbar{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:9px 13px;border-bottom:1px solid rgba(255,255,255,.075);flex:none}
+.research-filter{border:1px solid transparent;background:transparent;color:#a69db8;padding:6px 10px;font-size:10px;letter-spacing:.4px;cursor:pointer}
+.research-filter:hover{background:rgba(255,255,255,.05)}
+.research-filter.active{border-color:rgba(194,164,255,.32);color:#e2d2ff;background:rgba(133,98,195,.18)}
+.research-search{margin-left:auto;width:min(230px,32vw);background:rgba(0,0,0,.23);border:1px solid rgba(255,255,255,.13);color:#eee7f8;padding:7px 9px;font:inherit;font-size:11px;outline:none}
+.research-search:focus{border-color:rgba(198,166,255,.65)}
+.research-main{display:grid;grid-template-columns:minmax(0,1fr) 286px;min-height:0;flex:1}
+.research-viewport{position:relative;overflow:auto;min-width:0;min-height:0;background-image:radial-gradient(circle at 50% 40%,rgba(104,72,155,.08),transparent 45%),linear-gradient(rgba(191,177,225,.035) 1px,transparent 1px),linear-gradient(90deg,rgba(191,177,225,.035) 1px,transparent 1px);background-size:auto,28px 28px,28px 28px;scrollbar-color:#493d5e #0a0910;scrollbar-width:thin}
+.research-canvas{position:relative;width:1190px;height:760px}
+.research-connections{position:absolute;inset:0;width:100%;height:100%;overflow:visible;pointer-events:none}
+.research-link{stroke:rgba(174,153,211,.38);stroke-width:2;fill:none}
+.research-link.available{stroke:rgba(235,193,119,.72)}
+.research-node{position:absolute;width:158px;min-height:78px;display:flex;align-items:center;gap:9px;padding:10px 10px;background:linear-gradient(145deg,rgba(35,31,48,.96),rgba(12,11,20,.97));border:1px solid rgba(181,164,211,.24);color:#d0cadb;text-align:left;cursor:pointer;box-shadow:0 4px 11px rgba(0,0,0,.23);transition:border-color .12s,background .12s,filter .12s;z-index:2}
+.research-node:hover{border-color:rgba(219,191,255,.65);background:linear-gradient(145deg,rgba(58,47,77,.98),rgba(16,13,27,.98))}
+.research-node.selected{border-color:#eac58a;box-shadow:0 0 0 1px rgba(234,197,138,.14),0 0 18px rgba(221,169,101,.13)}
+.research-node.researched{border-color:rgba(143,226,183,.55);background:linear-gradient(145deg,rgba(33,63,52,.92),rgba(12,22,21,.98))}
+.research-node.locked{filter:saturate(.55);opacity:.66}
+.research-node.available{border-color:rgba(234,197,138,.42)}
+.research-node.sector-gated{border-style:dashed}
+.research-glyph{width:33px;height:33px;flex:none;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.11);color:#d9c3ff;font-size:18px;text-shadow:0 0 10px currentColor}
+.research-glyph.copper{color:#e9a05e}.research-glyph.lead{color:#afb9ca}.research-glyph.graphite{color:#b6a8d8}.research-glyph.silicon{color:#e4d782}.research-glyph.energy{color:#f0c56e}.research-glyph.defense{color:#e19b8d}.research-glyph.core{color:#9ce3de}
+.research-node-copy{display:flex;flex-direction:column;gap:4px;min-width:0}
+.research-node-copy strong{font-size:11px;line-height:1.25;font-weight:750;color:#ece7f4;overflow-wrap:anywhere}
+.research-node-copy small{font-size:9px;line-height:1.25;color:#a49bb3}
+.research-node-cost{font-size:9px;color:#e0bd85;white-space:nowrap}
+.research-detail{border-left:1px solid rgba(255,255,255,.1);background:rgba(5,5,12,.57);min-width:0;overflow:auto;padding:15px 15px 18px;scrollbar-color:#493d5e #0a0910;scrollbar-width:thin}
+.research-detail-kicker{font-size:9px;letter-spacing:1.8px;color:#9e91b5;text-transform:uppercase}
+.research-detail-head{display:flex;align-items:center;gap:11px;margin:10px 0 11px}
+.research-detail-glyph{height:46px;width:46px;display:flex;align-items:center;justify-content:center;border:1px solid rgba(207,178,255,.23);background:rgba(140,105,200,.12);font-size:24px;color:#e3d0ff;flex:none}
+.research-detail-head h3{margin:0;font-size:17px;line-height:1.2;color:#f3edf9}
+.research-detail-head p{margin:5px 0 0;font-size:10px;color:#a79eb6}
+.research-state{display:inline-flex;align-items:center;gap:6px;margin-bottom:11px;padding:5px 7px;border:1px solid rgba(255,255,255,.12);font-size:9px;letter-spacing:.7px;color:#bcb2cf;background:rgba(255,255,255,.035)}
+.research-state::before{content:"";width:6px;height:6px;border-radius:50%;background:#81768f}
+.research-state.researched{color:#a9e7c4;border-color:rgba(143,226,183,.28)}.research-state.researched::before{background:#88d6ac}
+.research-state.ready{color:#f2cf94;border-color:rgba(234,197,138,.28)}.research-state.ready::before{background:#eac58a}
+.research-state.gated{color:#eaa3a3;border-color:rgba(222,119,119,.25)}.research-state.gated::before{background:#d77c7c}
+.research-description{font-size:11px;line-height:1.55;color:#b9b1c8;margin:0 0 15px}
+.research-detail-section{border-top:1px solid rgba(255,255,255,.09);padding-top:12px;margin-top:12px}
+.research-detail-section h4{font-size:9px;font-weight:800;letter-spacing:1.5px;color:#9c92b0;text-transform:uppercase;margin:0 0 9px}
+.research-cost-list{display:flex;flex-direction:column;gap:7px}
+.research-cost-item{display:grid;grid-template-columns:18px 1fr auto;align-items:center;gap:7px;font-size:10px;color:#cfc8dc}
+.research-item-icon{width:16px;height:16px;position:relative;display:inline-block;background:var(--item-color);clip-path:polygon(25% 0,75% 0,100% 25%,100% 75%,75% 100%,25% 100%,0 75%,0 25%);box-shadow:inset 0 0 0 1px #ffffff30}
+.research-cost-amount{color:#e6d5af;font-variant-numeric:tabular-nums}
+.research-prereq-list{display:flex;flex-direction:column;gap:7px}
+.research-prereq{display:flex;align-items:flex-start;gap:7px;color:#aca3bd;font-size:10px;line-height:1.4}
+.research-prereq-icon{font-size:12px;color:#b7a8d6;flex:none}
+.research-progress{height:4px;background:rgba(255,255,255,.08);margin:12px 0 6px;overflow:hidden}
+.research-progress span{display:block;width:0;height:100%;background:linear-gradient(90deg,#eac58a,#9b7aca)}
+.research-progress-label{font-size:9px;color:#8f869e}
+.research-unavailable{width:100%;margin-top:14px;padding:10px 9px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.11);color:#837b91;font-weight:750;font-size:10px;letter-spacing:.7px;cursor:not-allowed}
+.research-note{padding:10px 14px;border-top:1px solid rgba(255,255,255,.09);color:#8e859f;font-size:9px;line-height:1.45;background:rgba(0,0,0,.18);flex:none}
+.research-node[hidden]{display:none}
+@media(max-width:900px){.research-main{grid-template-columns:minmax(0,1fr) 245px}.research-canvas{transform-origin:top left}.research-detail{padding:12px}.research-node{width:150px}}
+@media(max-width:680px){.research-screen{padding:0}.research-window{width:100%;height:100%;max-height:100%;border:0}.research-header{padding:11px 12px}.research-title strong{font-size:12px}.research-pool{max-width:45vw;font-size:9px}.research-toolbar{padding:7px;gap:3px}.research-filter{padding:6px 7px;font-size:9px}.research-search{width:100%;max-width:none;margin:2px 0 0}.research-main{display:flex;flex-direction:column;min-height:0}.research-viewport{flex:0 0 54%;min-height:220px}.research-detail{flex:1;min-height:180px;border-left:0;border-top:1px solid rgba(255,255,255,.1)}.research-canvas{width:1190px;height:760px}.research-node{width:152px}.research-note{font-size:8px;padding:7px 10px}}
+
+button:focus-visible{outline:2px solid #f2c14e;outline-offset:3px}
+@media(max-width:600px){
+  .scene{padding:23px 16px 16px}
+  .titlewrap{gap:10px}
+  h1.title{font-size:clamp(32px,9.5vw,52px);letter-spacing:3px}
+  .chevron.left{border-top-width:15px;border-bottom-width:15px;border-right-width:19px}
+  .chevron.right{border-top-width:15px;border-bottom-width:15px;border-left-width:19px}
+  .build{font-size:10px;letter-spacing:1.6px}
+  .menu{margin-top:31px;width:min(350px,91vw)}
+  .mbtn{padding:12px 14px;font-size:16px}
+  .screen{padding:22px 14px 16px}
+  .playgrid{width:min(370px,92vw);gap:11px;margin-top:28px}
+  .pbtn{padding:18px 8px}
+  .hud-left{top:max(13px,env(safe-area-inset-top));left:max(13px,env(safe-area-inset-left));width:116px}
+  .hud-left .backlink{margin-bottom:7px;font-size:12px}
+  .ptab{font-size:11px;padding:4px 6px}
+  .pdiff{margin-top:8px;padding:3px 6px;font-size:10px}
+  .sector-panel{width: min(340px,calc(100vw - 26px));bottom:max(14px,calc(env(safe-area-inset-bottom) + 10px));padding:0 13px 10px}
+  .sector-head{padding:10px 0 7px}
+  .sector-name{font-size:14px}
+  .sector-status{font-size:10px}
+  .resource-line{padding:7px 0;gap:7px}
+  .resource-icon{width:18px;height:18px}
+  .resource-icons{gap:4px}
+  .resource-label{font-size:9px}
+  .sector-threat{font-size:9px}
+  .sector-count,.mini-logo{display:none}
+}
+@media(max-height:620px) and (min-width:601px){
+  .sector-panel{bottom:10px;padding-bottom:8px}
+  .sector-head{padding:8px 0 5px}
+  .resource-line{padding:6px 0}
+  .panel-actions{padding-top:7px}
+  .hud-left{top:12px}
+}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;transition:none!important}}
+
+/* Version 2: Ground Zero play view only; existing screens/styles remain unchanged. */
+#scr-groundzero{padding:0;align-items:stretch;justify-content:stretch;background:#090d11;isolation:isolate}
+#gz-map-canvas{position:absolute;inset:0;width:100%;height:100%;display:block;z-index:0;touch-action:none;image-rendering:pixelated}
+.gz-topbar,.gz-bottombar{position:absolute;z-index:3;display:flex;align-items:center;gap:12px;background:rgba(8,10,15,.83);border:1px solid rgba(255,255,255,.13);box-shadow:0 8px 28px rgba(0,0,0,.35);backdrop-filter:blur(8px);color:#eceef2}
+.gz-topbar{left:max(12px,env(safe-area-inset-left));right:max(12px,env(safe-area-inset-right));top:max(12px,env(safe-area-inset-top));min-height:46px;padding:7px 12px;justify-content:space-between}
+.gz-title{font-size:13px;font-weight:850;letter-spacing:1.4px;text-transform:uppercase}
+.gz-meta{font-size:11px;color:#aaaebe;margin-top:2px}
+.gz-back{font:inherit;font-size:12px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.16);border-radius:3px;padding:8px 10px;color:#eee;cursor:pointer;white-space:nowrap}
+.gz-back:hover{background:rgba(255,255,255,.13)}
+.gz-bottombar{bottom:max(12px,env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);padding:9px 13px;font-size:11px;color:#b9bdc9;max-width:calc(100vw - 24px);justify-content:center;text-align:center;white-space:normal}
+.gz-bottombar strong{color:#f2c14e}
+.gz-error{position:absolute;z-index:5;left:50%;top:50%;transform:translate(-50%,-50%);width:min(620px,calc(100vw - 30px));padding:18px 20px;background:rgba(15,10,14,.96);border:1px solid rgba(226,136,79,.6);color:#f2e9e6;font-size:13px;line-height:1.55;box-shadow:0 15px 55px #000}
+.gz-error[hidden]{display:none}
+@media(max-width:520px){.gz-topbar{gap:8px;padding:7px 8px}.gz-title{font-size:11px;letter-spacing:.8px}.gz-meta{font-size:10px}.gz-back{font-size:11px;padding:7px 8px}.gz-bottombar{font-size:10px;gap:5px}}
+
+</style>
+</head>
+<body>
+<div class="scene" id="scene">
+  <div class="titlewrap">
+    <div class="chevron left"></div>
+    <div>
+      <h1 class="title">Mindustry</h1>
+      <div class="build" style="text-align:center;">steam build 99.12</div>
+    </div>
+    <div class="chevron right"></div>
+  </div>
+  <nav class="menu">
+    <button class="mbtn" onclick="showScreen('play')">
+      <svg viewBox="0 0 24 24"><polygon points="6,4 20,12 6,20" fill="currentColor" stroke="none"/></svg>
+      <span class="label">Spielen</span>
+    </button>
+    <button class="mbtn" onclick="toast('Editor ist in dieser Demo nicht verfügbar')">
+      <svg viewBox="0 0 24 24"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/></svg>
+      <span class="label">Editor</span>
+    </button>
+    <button class="mbtn" onclick="toast('Werkstatt ist in dieser Demo nicht verfügbar')">
+      <svg viewBox="0 0 24 24"><path d="M12 3v13"/><path d="M7 11l5 5 5-5"/><path d="M5 21h14"/></svg>
+      <span class="label">Werkstatt</span>
+    </button>
+    <button class="mbtn" onclick="toast('Mods sind in dieser Demo nicht verfügbar')">
+      <svg viewBox="0 0 24 24"><rect x="5" y="4" width="14" height="16" rx="1"/><path d="M8 8h8M8 12h8M8 16h5"/></svg>
+      <span class="label">Mods <span class="sub">(Alpha)</span></span>
+    </button>
+    <button class="mbtn" onclick="toast('Baupläne sind in dieser Demo nicht verfügbar')">
+      <svg viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="1"/><path d="M9 7h6M9 11h6M9 15h4"/></svg>
+      <span class="label">Baupläne</span>
+    </button>
+    <button class="mbtn" onclick="openModal('settings')">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 13a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V19a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 17.6a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 13 1.65 1.65 0 0 0 3.17 12H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 7a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 2.68 1.65 1.65 0 0 0 10 1.17V1a2 2 0 1 1 4 0v.09A1.65 1.65 0 0 0 15 2.6a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.32 7a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09A1.65 1.65 0 0 0 19.4 13z"/></svg>
+      <span class="label">Einstellungen</span>
+    </button>
+    <button class="mbtn" onclick="openModal('about')">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><line x1="12" y1="11" x2="12" y2="16.5"/><circle cx="12" cy="7.8" r="0.9" fill="currentColor" stroke="none"/></svg>
+      <span class="label">Info</span>
+    </button>
+    <button class="mbtn" onclick="toast('Zum Beenden Browser-Tab schließen')">
+      <svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+      <span class="label">Beenden</span>
+    </button>
+  </nav>
+</div>
+
+<div class="screen" id="scr-play">
+  <div class="titlewrap" style="margin-top:0;">
+    <div class="chevron left"></div>
+    <div>
+      <h1 class="title" style="font-size:clamp(28px,6vw,46px);">Mindustry</h1>
+      <div class="build" style="text-align:center;">release build 99.12</div>
+    </div>
+    <div class="chevron right"></div>
+  </div>
+  <div class="playgrid">
+    <button class="pbtn" onclick="showScreen('sectors')">
+      <svg viewBox="0 0 24 24"><polygon points="6,4 20,12 6,20" fill="currentColor" stroke="none"/></svg>
+      Kampagne
+    </button>
+    <button class="pbtn" onclick="toast('Spiel laden ist in dieser Demo nicht verfügbar')">
+      <svg viewBox="0 0 24 24"><path d="M12 3v13"/><path d="M7 11l5 5 5-5"/><path d="M5 21h14"/></svg>
+      Spiel laden
+    </button>
+    <button class="pbtn" onclick="toast('Eigenes Spiel ist in dieser Demo nicht verfügbar')">
+      <svg viewBox="0 0 24 24"><polyline points="9 6 15 12 9 18"/></svg>
+      Eigenes Spiel
+    </button>
+    <button class="pbtn" onclick="toast('Spiel beitreten ist in dieser Demo nicht verfügbar')">
+      <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      Spiel beitreten
+    </button>
+    <button class="pbtn" onclick="toast('Editor ist in dieser Demo nicht verfügbar')">
+      <svg viewBox="0 0 24 24"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/></svg>
+      Editor
+    </button>
+    <button class="pbtn" onclick="openModal('settings')">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 13a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V19a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 17.6a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l-.06-.06A1.65 1.65 0 0 0 4.68 13 1.65 1.65 0 0 0 3.17 12H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 7a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 2.68 1.65 1.65 0 0 0 10 1.17V1a2 2 0 1 1 4 0v.09A1.65 1.65 0 0 0 15 2.6a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.32 7a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09A1.65 1.65 0 0 0 19.4 13z"/></svg>
+      Einstellungen
+    </button>
+    <button class="pbtn" onclick="toast('Mod-Liste ist in dieser Demo nicht verfügbar')">
+      <svg viewBox="0 0 24 24"><rect x="5" y="4" width="14" height="16" rx="1"/><path d="M8 8h8M8 12h8M8 16h5"/></svg>
+      Mod-Liste
+    </button>
+    <button class="pbtn" onclick="backToMenu()">
+      <svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+      Zurück
+    </button>
+  </div>
+</div>
+
+<div class="screen" id="scr-sectors">
+  <canvas class="sector-canvas" id="sector-canvas" aria-label="Drehbare Serpulo-Sektoransicht"></canvas>
+  <div class="hud-left">
+    <button class="backlink" onclick="showScreen('play')">‹ Zurück</button>
+    <div class="planet-tabs">
+      <button class="ptab" type="button" onclick="toast('Erekir bleibt in dieser Demo unverändert')">⬡ Erekir</button>
+      <button class="ptab active" type="button" aria-current="page">⬡ Serpulo</button>
+    </div>
+    <div class="pdiff">▦ Schwierigkeit</div>
+  </div>
+  <section class="sector-panel" aria-label="Ausgewählter Sektor">
+    <div class="sector-head">
+      <div class="sector-title-wrap">
+        <div class="sector-kicker">Serpulo · Kampagne</div>
+        <div class="sector-name" id="sel-name">Nullpunkt</div>
+        <div class="sector-status" id="sel-status">Startsektor – bereit zur Landung.</div>
+        <div class="sector-threat" id="sel-threat">Gefahr: Niedrig</div>
+      </div>
+      <div class="sector-index" id="sector-index">#170</div>
+    </div>
+    <div class="resource-line" id="resource-line" aria-label="Ressourcen des Sektors">
+      <span class="resource-label">Ressourcen:</span>
+      <div class="resource-icons" id="resource-icons" aria-live="polite"></div>
+    </div>
+    <div class="panel-actions">
+      <div class="panel-left-actions">
+        <button class="research-trigger" id="research-trigger" type="button" aria-label="Forschungsbaum öffnen" title="Forschungsbaum (T)" onclick="openResearchTree()"><svg viewBox="0 0 20 20"><rect x="1.5" y="1.5" width="5" height="5" rx=".5"/><rect x="13.5" y="1.5" width="5" height="5" rx=".5"/><rect x="7.5" y="13.5" width="5" height="5" rx=".5"/><path d="M6.5 4h7M10 4v5.5M10 9.5l-2.5 4M10 9.5l2.5 4"/></svg></button>
+        <button class="sector-info" id="sector-info" type="button" aria-label="Statistiken" title="Statistiken" onclick="showSectorStats()" hidden>▥ Statistiken</button>
+      </div>
+      <button class="sbtn" id="sel-action" type="button" onclick="launchSelectedSector()"><span id="action-icon">▶</span><span id="action-label">Start</span></button>
+    </div>
+  </section>
+  <div class="sector-count" id="sector-count">#170</div>
+  <div class="mini-logo"><b>MINDUSTRY</b><small>v8 BETA</small></div>
+</div>
+
+
+<div class="screen" id="scr-groundzero" aria-label="Ground Zero Karte">
+  <canvas id="gz-map-canvas" aria-label="Stilisierte Mindustry Ground Zero Karte"></canvas>
+  <div class="gz-topbar">
+    <button class="gz-back" type="button" onclick="closeGroundZeroGame()">‹ Kampagne</button>
+    <div style="min-width:0;flex:1;text-align:center">
+      <div class="gz-title">Ground Zero</div>
+      <div class="gz-meta" id="gz-map-status">Originalkarte wird geladen…</div>
+    </div>
+    <div class="gz-meta" id="gz-map-size" style="text-align:right;white-space:nowrap">— × —</div>
+  </div>
+  <div class="gz-bottombar"><strong>W A S D</strong>&nbsp; bewegen&nbsp; · &nbsp;<strong>↑ / →</strong>&nbsp; Zoom rein&nbsp; · &nbsp;<strong>↓ / ←</strong>&nbsp; Zoom raus&nbsp; · &nbsp;<span id="gz-zoom-label">100 %</span></div>
+  <div class="gz-error" id="gz-map-error" role="alert" hidden></div>
+</div>
+
+<div class="overlay" id="ov-settings">
+  <div class="modal">
+    <div class="modal-head"><h2>Einstellungen</h2><button class="modal-close" onclick="closeModal('settings')" aria-label="Schließen">✕</button></div>
+    <div class="modal-body">
+      <div class="row"><span class="k">Musiklautstärke</span><input aria-label="Musiklautstärke" type="range" min="0" max="100" value="60"></div>
+      <div class="row"><span class="k">Soundeffekte</span><input aria-label="Soundeffekte" type="range" min="0" max="100" value="80"></div>
+      <div class="row"><span class="k">Vollbild</span><div class="toggle on" role="switch" aria-checked="true" tabindex="0" onclick="toggleSetting(this)" onkeydown="toggleSettingKey(event,this)"></div></div>
+      <div class="row"><span class="k">VSync</span><div class="toggle on" role="switch" aria-checked="true" tabindex="0" onclick="toggleSetting(this)" onkeydown="toggleSettingKey(event,this)"></div></div>
+      <div class="row"><span class="k">Minimap anzeigen</span><div class="toggle" role="switch" aria-checked="false" tabindex="0" onclick="toggleSetting(this)" onkeydown="toggleSettingKey(event,this)"></div></div>
+      <div class="row"><span class="k">Auto-Pause</span><div class="toggle on" role="switch" aria-checked="true" tabindex="0" onclick="toggleSetting(this)" onkeydown="toggleSettingKey(event,this)"></div></div>
+      <div class="row"><span class="k">Sprache</span><span class="k">Deutsch</span></div>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="ov-about">
+  <div class="modal">
+    <div class="modal-head"><h2>Info</h2><button class="modal-close" onclick="closeModal('about')" aria-label="Schließen">✕</button></div>
+    <div class="modal-body">
+      <p>Diese Seite ist eine optische Nachbildung des Mindustry-Hauptmenüs als eigenständige HTML-Demo. Mindustry ist ein Open-Source-Spiel, das Tower-Defense mit Fabrikbau und Logistik verbindet.</p>
+      <p>Diese Demo dient nur zu Design-Zwecken und ist nicht mit dem Originalspiel verbunden.</p>
+      <div class="row"><span class="k">Build</span><span>99.12 (Demo)</span></div>
+      <div class="row"><span class="k">Engine</span><span>HTML / CSS / JS</span></div>
+    </div>
+  </div>
+</div>
+
+
+<div class="research-screen" id="research-screen" aria-hidden="true">
+  <section class="research-window" role="dialog" aria-modal="true" aria-labelledby="research-heading">
+    <header class="research-header">
+      <div class="research-title"><strong id="research-heading">FORSCHUNGSBAUM</strong><span>SERPULO · TECHNOLOGIEÜBERSICHT</span></div>
+      <div class="research-header-right"><div class="research-pool"><svg viewBox="0 0 18 18"><path d="M3 5.5 9 2l6 3.5v7L9 16l-6-3.5zM3 5.5l6 3.6 6-3.6M9 9.1V16"/></svg><span>Kerninventar: noch nicht verbunden</span></div><button class="research-close" type="button" aria-label="Forschungsbaum schließen" onclick="closeResearchTree()">×</button></div>
+    </header>
+    <div class="research-toolbar" role="toolbar" aria-label="Forschungsbereiche">
+      <button class="research-filter active" data-research-filter="Alle" type="button" onclick="setResearchFilter('Alle',this)">Alle</button>
+      <button class="research-filter" data-research-filter="Produktion" type="button" onclick="setResearchFilter('Produktion',this)">Produktion</button>
+      <button class="research-filter" data-research-filter="Transport" type="button" onclick="setResearchFilter('Transport',this)">Transport</button>
+      <button class="research-filter" data-research-filter="Verteidigung" type="button" onclick="setResearchFilter('Verteidigung',this)">Verteidigung</button>
+      <button class="research-filter" data-research-filter="Energie" type="button" onclick="setResearchFilter('Energie',this)">Energie</button>
+      <button class="research-filter" data-research-filter="Kern" type="button" onclick="setResearchFilter('Kern',this)">Kern</button>
+      <input class="research-search" id="research-search" type="search" placeholder="Technologie suchen …" aria-label="Technologie suchen" oninput="searchResearch(this.value)">
+    </div>
+    <div class="research-main">
+      <div class="research-viewport" id="research-viewport" tabindex="0" aria-label="Verschiebbarer Forschungsbaum">
+        <div class="research-canvas" id="research-canvas">
+          <svg class="research-connections" id="research-connections" viewBox="0 0 1190 760" aria-hidden="true"></svg>
+        </div>
+      </div>
+      <aside class="research-detail" id="research-detail" aria-live="polite"></aside>
+    </div>
+    <footer class="research-note">Die offiziellen Forschungskosten und Sektorbedingungen werden angezeigt. In dieser HTML-Demo sind Levelabschluss und Kerninventar noch nicht mit echtem Gameplay verbunden; deshalb können Technologien noch nicht erforscht oder bezahlt werden.</footer>
+  </section>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+const sectorCanvas=document.getElementById('sector-canvas');
+const sectorContext=sectorCanvas.getContext('2d',{alpha:true});
+const sectorResourceData={
+  'ground-zero':['copper','lead','scrap','water'],
+  'frozen-forest':['copper','lead','coal'],
+  'cratered-battleground':['copper','lead','sand','coal','scrap','water'],
+  'biomass-facility':['copper','lead','sand','coal','scrap','water'],
+  'stained-mountains':['copper','lead','sand','coal','titanium','scrap','water'],
+  'ruinous-shores':['copper','lead','sand','coal','scrap','water'],
+  'windswept-islands':['copper','lead','sand','coal','titanium','scrap','water'],
+  'facility-32m':['copper','lead','sand','coal','titanium','scrap','water'],
+  'fungal-pass':['copper','lead','sand','coal','titanium','scrap','water'],
+  'frontier':['copper','lead','sand','coal','titanium','water'],
+  'infested-canyons':['copper','lead','sand','coal','titanium','scrap','water'],
+  'nuclear-complex':['copper','lead','sand','coal','titanium','thorium','scrap','water'],
+  'tainted-woods':['copper','lead','sand','coal','titanium','water','oil'],
+  'perilous-harbor':['copper','lead','sand','coal','titanium','scrap','water'],
+  'extraction-outpost':['copper','lead','sand','coal','titanium','thorium','water','oil'],
+  'atolls':['copper','lead','sand','coal','titanium','thorium','water','oil'],
+  'overgrowth':['copper','lead','sand','coal','titanium','thorium','scrap','water','oil'],
+  'mycelial-bastion':['copper','lead','sand','coal','titanium','thorium','scrap','water','oil'],
+  'littoral-shipyard':['copper','lead','sand','coal','titanium','thorium','scrap','water','oil'],
+  'salt-flats':['copper','lead','sand','coal','titanium','scrap'],
+  'tar-fields':['copper','lead','sand','coal','titanium','thorium','scrap','water','oil'],
+  'impact-0078':['copper','lead','coal','titanium','thorium','scrap','water'],
+  'desolate-rift':['copper','lead','sand','coal','titanium','thorium'],
+  'planetary-terminal':['copper','lead','sand','coal','titanium','thorium','scrap','water','oil'],
+  'coastline':['copper','lead','sand','coal','titanium','thorium','water'],
+  'testing-grounds':['copper','lead','sand','coal','titanium','thorium','scrap','oil'],
+  'naval-fortress':['copper','lead','sand','coal','titanium','thorium','water','oil'],
+  'sunken-pier':['copper','lead','sand','coal','titanium','thorium','water','oil'],
+  'weathered-channels':['copper','lead','sand','coal','titanium','thorium','scrap','water'],
+  'fallen-vessel':['copper','lead','sand','coal','titanium','thorium','scrap','water','oil']
+};
+const resourceDefinitions={
+  copper:{name:'Kupfer',svg:'<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 2H10V4H13V11H10V14H4V11H2V4H3Z" fill="#8e452c"/><path d="M4 3H10V5H12V10H9V12H5V10H4Z" fill="#d8793e"/><path d="M4 3H9V5H6V8H4Z" fill="#ffbd72"/><path d="M6 9H10V11H6Z" fill="#b85e32"/><path d="M10 5H12V8H10Z" fill="#f39b4b"/></svg>'},
+  lead:{name:'Blei',svg:'<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3H10V5H13V11H10V13H4V11H2V5H3Z" fill="#4a5062"/><path d="M4 4H10V6H12V10H9V12H5V10H4Z" fill="#9ca4bb"/><path d="M4 4H9V6H6V9H4Z" fill="#e2e6f2"/><path d="M6 9H10V11H6Z" fill="#727b91"/><path d="M10 6H12V9H10Z" fill="#bac3d6"/></svg>'},
+  sand:{name:'Sand',svg:'<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 6H5V3H9V5H13V9H11V13H5V11H2Z" fill="#8b7044"/><path d="M3 6H6V4H9V6H12V9H10V12H5V10H3Z" fill="#d7bd7e"/><path d="M4 6H6V8H4ZM8 5H10V7H8ZM7 9H10V11H7Z" fill="#f3dda6"/><path d="M3 9H5V10H3ZM10 8H12V9H10Z" fill="#a88a56"/></svg>'},
+  coal:{name:'Kohle',svg:'<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3H8V2H11V5H14V10H11V13H5V11H2V6H3Z" fill="#161821"/><path d="M4 4H8V3H10V6H12V9H10V12H5V10H3V6H4Z" fill="#373a49"/><path d="M4 4H7V6H5V8H4Z" fill="#767888"/><path d="M8 8H11V10H8Z" fill="#252833"/></svg>'},
+  titanium:{name:'Titan',svg:'<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 2H10V4H13V11H10V14H4V11H2V4H3Z" fill="#365f74"/><path d="M4 3H10V5H12V10H9V12H5V10H4Z" fill="#7fc6d7"/><path d="M4 3H9V5H6V8H4Z" fill="#d2f3f5"/><path d="M6 9H10V11H6Z" fill="#5396ad"/><path d="M10 5H12V8H10Z" fill="#abdfe8"/></svg>'},
+  thorium:{name:'Thorium',svg:'<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M7 1H10V4H13V8H11V13H8V15H5V11H3V7H5V3H7Z" fill="#6f456f"/><path d="M7 2H9V5H12V8H10V12H8V14H6V10H4V7H6V4H7Z" fill="#cb84d4"/><path d="M7 2H9V5H8V8H6V5H7Z" fill="#f5c9f4"/><path d="M8 9H10V12H8Z" fill="#a45ab3"/></svg>'},
+  scrap:{name:'Schrott',svg:'<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 5H6V2H9V6H13V9H10V13H6V10H3Z" fill="#785238"/><path d="M3 5H6V3H8V7H12V8H9V12H7V9H4Z" fill="#b77a48"/><path d="M3 5H5V7H3ZM7 3H8V5H7Z" fill="#efb26f"/><path d="M9 9H12V10H10V12H8V10H9Z" fill="#6e6a66"/><path d="M4 8H6V10H4Z" fill="#d59a5b"/></svg>'},
+  water:{name:'Wasser',svg:'<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1C7 4 2 8 2 11a6 5 0 0 0 12 0C14 8 9 4 8 1Z" fill="#285aab"/><path d="M8 3C6 6 4 8.5 4 11a4 3.5 0 0 0 8 0C12 8.5 10 6 8 3Z" fill="#4ba5eb"/><path d="M5 10C5 8 6 7 7 6" fill="none" stroke="#c2efff" stroke-width="1.5" stroke-linecap="square"/><path d="M6 12H10" stroke="#83d5ff" stroke-width="1"/></svg>'},
+  oil:{name:'Öl',svg:'<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1C7 4 2 8 2 11a6 5 0 0 0 12 0C14 8 9 4 8 1Z" fill="#19141e"/><path d="M8 3C6 6 4 8.5 4 11a4 3.5 0 0 0 8 0C12 8.5 10 6 8 3Z" fill="#4c3b4a"/><path d="M5 10C5 8 6 7 7 6" fill="none" stroke="#a78a79" stroke-width="1.2" stroke-linecap="square"/><path d="M6 12H10" stroke="#806572" stroke-width="1"/></svg>'}
+};
+const sectorThreats={
+  'ground-zero':'Niedrig','frozen-forest':'Niedrig','cratered-battleground':'Niedrig','fungal-pass':'Niedrig',
+  'biomass-facility':'Mittel','ruinous-shores':'Mittel','stained-mountains':'Mittel','facility-32m':'Mittel','windswept-islands':'Mittel','frontier':'Mittel','infested-canyons':'Mittel','perilous-harbor':'Mittel',
+  'salt-flats':'Hoch','tainted-woods':'Hoch','extraction-outpost':'Hoch','coastline':'Hoch','overgrowth':'Hoch','tar-fields':'Hoch','testing-grounds':'Hoch','atolls':'Hoch','impact-0078':'Hoch','nuclear-complex':'Hoch',
+  'naval-fortress':'Extrem','mycelial-bastion':'Extrem','desolate-rift':'Extrem','weathered-channels':'Extrem','sunken-pier':'Extrem','littoral-shipyard':'Extrem','fallen-vessel':'Extrem','planetary-terminal':'Zerstörung'
+};
+const sectorDisplayNames={
+  'ground-zero':'Nullpunkt','frozen-forest':'Gefrorener Wald','cratered-battleground':'Kraterfeld','biomass-facility':'Biomassensyntheselabor','ruinous-shores':'Trümmerstrände','stained-mountains':'Beflecktes Gebirge','desolate-rift':'Einsame Kluft','nuclear-complex':'Nuklear-Produktionsstätte','overgrowth':'Überwucherung','tar-fields':'Teerfelder','salt-flats':'Salzebenen','fungal-pass':'Infizierter Gebirgspass','windswept-islands':'Windgepeitschte Inseln','extraction-outpost':'Extraktionsaußenposten','facility-32m':'Einrichtung 32 M','tainted-woods':'Vergifteter Wald','infested-canyons':'Verseuchter Canyon','impact-0078':'Einschlag 0078'
+};
+function renderSectorResources(sector){
+  const resourceKeys=sectorResourceData[sector.key]||[];
+  const container=document.getElementById('resource-icons');
+  const line=document.getElementById('resource-line');
+  container.innerHTML=resourceKeys.map(key=>{
+    const resource=resourceDefinitions[key];
+    return resource?'<span class="resource-icon" role="img" aria-label="'+resource.name+'" title="'+resource.name+'">'+resource.svg+'</span>':'');
+  }).join('');
+  line.setAttribute('aria-label','Ressourcen: '+resourceKeys.map(key=>resourceDefinitions[key]?.name).filter(Boolean).join(', '));
+}
+function showSectorStats(){
+  const sector=sectors.find(item=>item.key===selectedSectorKey);
+  if(!sector||sector.state!=='captured')return;
+  const resources=(sectorResourceData[sector.key]||[]).map(key=>resourceDefinitions[key]?.name).filter(Boolean).join(', ');
+  toast('Statistiken für '+(sectorDisplayNames[sector.key]||sector.name)+': Ressourcen – '+resources+'.');
+}
+const sectorNames=[
+  {id:97,key:'windswept-islands',name:'Windverwehte Inseln',state:'locked'},
+  {id:223,key:'stained-mountains',name:'Verfärbte Berge',state:'locked'},
+  {id:166,key:'weathered-channels',name:'Verwitterte Kanäle',state:'locked'},
+  {id:213,key:'extraction-outpost',name:'Extraktionsaußenposten',state:'locked'},
+  {id:164,key:'coastline',name:'Küstenlinie',state:'locked'},
+  {id:165,key:'naval-fortress',name:'Marinefestung',state:'locked'},
+  {id:86,key:'frontier',name:'Grenzland',state:'locked'},
+  {id:173,key:'sunken-pier',name:'Versunkener Pier',state:'locked'},
+  {id:170,key:'ground-zero',name:'Ground Zero',state:'captured'},
+  {id:143,key:'mycelial-bastion',name:'Myzel-Bastion',state:'locked'},
+  {id:219,key:'cratered-battleground',name:'Kraterfeld',state:'capturable'},
+  {id:65,key:'facility-32m',name:'Anlage 32M',state:'locked'},
+  {id:75,key:'atolls',name:'Atolle',state:'locked'},
+  {id:142,key:'overgrowth',name:'Überwucherung',state:'locked'},
+  {id:169,key:'testing-grounds',name:'Testgelände',state:'locked'},
+  {id:64,key:'frozen-forest',name:'Frostwald',state:'captured'},
+  {id:204,key:'littoral-shipyard',name:'Küstenwerft',state:'locked'},
+  {id:98,key:'salt-flats',name:'Salzfelder',state:'capturable'},
+  {id:145,key:'tainted-woods',name:'Verseuchte Wälder',state:'locked'},
+  {id:85,key:'infested-canyons',name:'Befallene Schluchten',state:'locked'},
+  {id:271,key:'desolate-rift',name:'Verlassener Riss',state:'locked'},
+  {id:228,key:'nuclear-complex',name:'Nuklearer Produktionskomplex',state:'locked'},
+  {id:41,key:'ruinous-shores',name:'Verfallene Küsten',state:'locked'},
+  {id:217,key:'planetary-terminal',name:'Planetarer Startterminal',state:'locked'},
+  {id:266,key:'impact-0078',name:'Impact 0078',state:'locked'},
+  {id:214,key:'perilous-harbor',name:'Gefährlicher Hafen',state:'locked'},
+  {id:95,key:'fallen-vessel',name:'Gefallenes Schiff',state:'locked'},
+  {id:221,key:'fungal-pass',name:'Pilzpfad',state:'locked'},
+  {id:99,key:'tar-fields',name:'Teerfelder',state:'capturable'},
+  {id:23,key:'biomass-facility',name:'Biomasse-Anlage',state:'locked'}
+];
+
+const campaignRequirements={
+  'ground-zero':[],
+  'frozen-forest':['ground-zero'],
+  'cratered-battleground':['frozen-forest'],
+  'ruinous-shores':['cratered-battleground'],
+  'windswept-islands':['ruinous-shores'],
+  'biomass-facility':['cratered-battleground'],
+  'stained-mountains':['biomass-facility'],
+  'facility-32m':['stained-mountains','windswept-islands'],
+  'fungal-pass':['ground-zero'],
+  'frontier':['biomass-facility','fungal-pass'],
+  'infested-canyons':['fungal-pass','frontier'],
+  'nuclear-complex':['infested-canyons'],
+  'tainted-woods':['infested-canyons'],
+  'perilous-harbor':['biomass-facility','frontier'],
+  'extraction-outpost':['windswept-islands','perilous-harbor','facility-32m'],
+  'atolls':['extraction-outpost'],
+  'overgrowth':['frontier','windswept-islands'],
+  'mycelial-bastion':['overgrowth'],
+  'littoral-shipyard':['desolate-rift','naval-fortress','mycelial-bastion'],
+  'salt-flats':['windswept-islands','fungal-pass','frontier'],
+  'tar-fields':['salt-flats'],
+  'impact-0078':['tar-fields'],
+  'desolate-rift':['impact-0078'],
+  'planetary-terminal':['desolate-rift','nuclear-complex','extraction-outpost','mycelial-bastion','littoral-shipyard'],
+  'coastline':['tar-fields','salt-flats'],
+  'testing-grounds':['coastline'],
+  'naval-fortress':['coastline','extraction-outpost'],
+  'sunken-pier':['naval-fortress','coastline'],
+  'weathered-channels':['impact-0078','naval-fortress'],
+  'fallen-vessel':['weathered-channels']
+};
+const campaignStorageKey='mindustry-serpulo-campaign-progress-v1';
+let completedSectorKeys=new Set();
+function loadCampaignProgress(){
+  try{
+    const parsed=JSON.parse(localStorage.getItem(campaignStorageKey)||'null');
+    const valid=new Set(Object.keys(campaignRequirements));
+    if(parsed&&Array.isArray(parsed.completed))completedSectorKeys=new Set(parsed.completed.filter(key=>valid.has(key)));
+  }catch(error){completedSectorKeys=new Set();}
+}
+function saveCampaignProgress(){
+  try{localStorage.setItem(campaignStorageKey,JSON.stringify({completed:[...completedSectorKeys]}));}catch(error){}
+}
+function refreshCampaignStates(){
+  const completedIds=new Set(sectors.filter(sector=>sector.key&&completedSectorKeys.has(sector.key)).map(sector=>sector.sectorId));
+  for(const sector of sectors){
+    if(!sector.key){sector.state='neutral';continue;}
+    if(completedSectorKeys.has(sector.key)){sector.state='captured';continue;}
+    const requirements=campaignRequirements[sector.key];
+    const requirementsMet=Array.isArray(requirements)&&requirements.every(key=>completedSectorKeys.has(key));
+    const adjacentToCaptured=sector.neighbors.some(id=>completedIds.has(id));
+    sector.state=sector.key==='ground-zero'||requirementsMet&&adjacentToCaptured?'capturable':'locked';
+  }
+}
+
+const terrainPalette=['#302c3b','#393346','#443d50','#51485e','#292633','#3a3a46','#474956','#574b49','#66594f','#252532','#423b4c','#62556b'];
+let sectors=[];
+let facets=[];
+let stars=[];
+let selectedSectorKey='ground-zero';
+let selectedSectorName='Ground Zero';
+let selectedSectorState='captured';
+let yaw=0.17;
+let pitch=0.035;
+let viewportWidth=window.innerWidth;
+let viewportHeight=window.innerHeight;
+let pixelRatio=1;
+let planet={x:viewportWidth/2,y:viewportHeight*.45,r:180};
+let renderedSectors=[];
+let pointerState=null;
+let cachedYaw=NaN;
+let cachedPitch=NaN;
+let rotationCache={cy:1,sy:0,cp:1,sp:0};
+let toastTimer;
+let animationFrame=0;
+let lastDrawTime=0;
+
+function seededRandom(seed){
+  let value=seed>>>0;
+  return function(){
+    value=(value*1664525+1013904223)>>>0;
+    return value/4294967296;
+  };
+}
+const random=seededRandom(991287);
+function degrees(value){return value*Math.PI/180;}
+function normalizeVector(point){
+  const magnitude=Math.hypot(point.x,point.y,point.z)||1;
+  return {x:point.x/magnitude,y:point.y/magnitude,z:point.z/magnitude};
+}
+function surfacePoint(latitude,longitude){
+  const lat=degrees(latitude);
+  const lon=degrees(longitude);
+  return {x:Math.cos(lat)*Math.sin(lon),y:Math.sin(lat),z:Math.cos(lat)*Math.cos(lon)};
+}
+function tangentPoint(center,latitude,longitude,radius,angle){
+  const lat=degrees(latitude);
+  const lon=degrees(longitude);
+  const east={x:Math.cos(lon),y:0,z:-Math.sin(lon)};
+  const north={x:-Math.sin(lat)*Math.sin(lon),y:Math.cos(lat),z:-Math.sin(lat)*Math.cos(lon)};
+  const tangent={x:east.x*Math.cos(angle)+north.x*Math.sin(angle),y:east.y*Math.cos(angle)+north.y*Math.sin(angle),z:east.z*Math.cos(angle)+north.z*Math.sin(angle)};
+  return normalizeVector({x:center.x*Math.cos(radius)+tangent.x*Math.sin(radius),y:center.y*Math.cos(radius)+tangent.y*Math.sin(radius),z:center.z*Math.cos(radius)+tangent.z*Math.sin(radius)});
+}
+function rotatePoint(point){
+  if(cachedYaw!==yaw||cachedPitch!==pitch){
+    cachedYaw=yaw;
+    cachedPitch=pitch;
+    rotationCache={cy:Math.cos(yaw),sy:Math.sin(yaw),cp:Math.cos(pitch),sp:Math.sin(pitch)};
+  }
+  const {cy,sy,cp,sp}=rotationCache;
+  const x=point.x*cy+point.z*sy;
+  const z=-point.x*sy+point.z*cy;
+  const y2=point.y*cp-z*sp;
+  const z2=point.y*sp+z*cp;
+  return {x,y:y2,z:z2};
+}
+function projectPoint(point){
+  const rotated=rotatePoint(point);
+  return {x:planet.x+rotated.x*planet.r,y:planet.y-rotated.y*planet.r,depth:rotated.z};
+}
+function aimAtSector(key){
+  const target=sectors.find(sector=>sector.key===key);
+  if(!target)return;
+  yaw=Math.atan2(-target.point.x,target.point.z);
+  pitch=Math.atan2(target.point.y,Math.hypot(target.point.x,target.point.z));
+  cachedYaw=NaN;
+  cachedPitch=NaN;
+}
+function createPlanetTile(id){
+  const edgeCount=id<12?5:6;
+  return {id,edgeCount,tiles:new Array(edgeCount).fill(null),corners:new Array(edgeCount).fill(null),point:null};
+}
+function createPlanetCorner(id){
+  return {id,tiles:new Array(3).fill(null),corners:new Array(3).fill(null),point:null};
+}
+function planetGridPosition(tile,target){
+  return tile.tiles.indexOf(target);
+}
+function addPlanetCorner(grid,id,t1,t2,t3){
+  const corner=grid.corners[id];
+  const adjacent=[grid.tiles[t1],grid.tiles[t2],grid.tiles[t3]];
+  corner.point=normalizeVector({
+    x:adjacent[0].point.x+adjacent[1].point.x+adjacent[2].point.x,
+    y:adjacent[0].point.y+adjacent[1].point.y+adjacent[2].point.y,
+    z:adjacent[0].point.z+adjacent[1].point.z+adjacent[2].point.z
+  });
+  for(let i=0;i<3;i++){
+    const tile=adjacent[i];
+    const neighbor=adjacent[(i+2)%3];
+    tile.corners[planetGridPosition(tile,neighbor)]=corner;
+    corner.tiles[i]=tile;
+  }
+}
+function connectPlanetCorners(grid){
+  for(const corner of grid.corners){
+    for(let i=0;i<3;i++){
+      const tile=corner.tiles[i];
+      const position=tile.corners.indexOf(corner);
+      corner.corners[i]=tile.corners[(position+1)%tile.edgeCount];
+    }
+  }
+}
+function createInitialPlanetGrid(){
+  const x=-0.525731112119133606;
+  const z=-0.850650808352039932;
+  const points=[
+    {x:-x,y:0,z},{x:x,y:0,z},{x:-x,y:0,z:-z},{x,y:0,z:-z},
+    {x:0,y:z,z:x},{x:0,y:z,z:-x},{x:0,y:-z,z:x},{x:0,y:-z,z:-x},
+    {x:z,y:x,z:0},{x:-z,y:x,z:0},{x:z,y:-x,z:0},{x:-z,y:-x,z:0}
+  ];
+  const neighbors=[
+    [9,4,1,6,11],[4,8,10,6,0],[11,7,3,5,9],[2,7,10,8,5],
+    [9,5,8,1,0],[2,3,8,4,9],[0,1,10,7,11],[11,6,10,3,2],
+    [5,3,10,1,4],[2,5,4,0,11],[3,7,6,1,8],[7,2,9,0,6]
+  ];
+  const grid={size:0,tiles:Array.from({length:12},(_,id)=>createPlanetTile(id)),corners:Array.from({length:20},(_,id)=>createPlanetCorner(id))};
+  grid.tiles.forEach((tile,index)=>{
+    tile.point=points[index];
+    tile.tiles=neighbors[index].map(id=>grid.tiles[id]);
+  });
+  for(let i=0;i<5;i++)addPlanetCorner(grid,i,0,neighbors[0][(i+4)%5],neighbors[0][i]);
+  for(let i=0;i<5;i++)addPlanetCorner(grid,i+5,3,neighbors[3][(i+4)%5],neighbors[3][i]);
+  addPlanetCorner(grid,10,10,1,8);
+  addPlanetCorner(grid,11,1,10,6);
+  addPlanetCorner(grid,12,6,10,7);
+  addPlanetCorner(grid,13,6,7,11);
+  addPlanetCorner(grid,14,11,7,2);
+  addPlanetCorner(grid,15,11,2,9);
+  addPlanetCorner(grid,16,9,2,5);
+  addPlanetCorner(grid,17,9,5,4);
+  addPlanetCorner(grid,18,4,5,8);
+  addPlanetCorner(grid,19,4,8,1);
+  connectPlanetCorners(grid);
+  return grid;
+}
+function subdividePlanetGrid(previous){
+  const previousTileCount=previous.tiles.length;
+  const previousCornerCount=previous.corners.length;
+  const size=previous.size+1;
+  const grid={
+    size,
+    tiles:Array.from({length:10*Math.pow(3,size)+2},(_,id)=>createPlanetTile(id)),
+    corners:Array.from({length:20*Math.pow(3,size)},(_,id)=>createPlanetCorner(id))
+  };
+  for(let i=0;i<previousTileCount;i++){
+    const tile=grid.tiles[i];
+    tile.point=previous.tiles[i].point;
+    for(let k=0;k<tile.edgeCount;k++)tile.tiles[k]=grid.tiles[previous.tiles[i].corners[k].id+previousTileCount];
+  }
+  for(let i=0;i<previousCornerCount;i++){
+    const previousCorner=previous.corners[i];
+    const tile=grid.tiles[i+previousTileCount];
+    tile.point=previousCorner.point;
+    for(let k=0;k<3;k++){
+      tile.tiles[2*k]=grid.tiles[previousCorner.corners[k].id+previousTileCount];
+      tile.tiles[2*k+1]=grid.tiles[previousCorner.tiles[k].id];
+    }
+  }
+  let nextCorner=0;
+  for(const previousTile of previous.tiles){
+    const tile=grid.tiles[previousTile.id];
+    for(let k=0;k<tile.edgeCount;k++){
+      addPlanetCorner(grid,nextCorner++,tile.id,tile.tiles[(k+tile.edgeCount-1)%tile.edgeCount].id,tile.tiles[k].id);
+    }
+  }
+  connectPlanetCorners(grid);
+  return grid;
+}
+function createOfficialPlanetGrid(size){
+  let grid=createInitialPlanetGrid();
+  for(let i=0;i<size;i++)grid=subdividePlanetGrid(grid);
+  return grid;
+}
+function createSectors(){
+  const grid=createOfficialPlanetGrid(3);
+  const presets=new Map(sectorNames.map(item=>[item.id,item]));
+  return grid.tiles.map(tile=>{
+    const preset=presets.get(tile.id);
+    const markerRoll=random();
+    return {
+      id:'sector-'+tile.id,
+      sectorId:tile.id,
+      point:tile.point,
+      neighbors:tile.tiles.map(neighbor=>neighbor.id),
+      corners:tile.corners.map(corner=>corner.point),
+      key:preset?.key||null,
+      name:preset?.name||null,
+      state:'locked',
+      iconType:preset?4:markerRoll>.47?Math.floor(random()*5):-1,
+      visualTint:random(),
+      hexRotation:0
+    };
+  });
+}
+function createFacets(){
+  const result=[];
+  const count=560;
+  const goldenAngle=Math.PI*(3-Math.sqrt(5));
+  for(let index=0;index<count;index++){
+    const y=1-(index/(count-1))*2;
+    const ring=Math.sqrt(Math.max(0,1-y*y));
+    const angle=goldenAngle*index;
+    const point={x:Math.cos(angle)*ring,y,z:Math.sin(angle)*ring};
+    const radius=degrees(2.2+random()*2.7);
+    const sides=5+Math.floor(random()*3);
+    const rotation=random()*Math.PI*2;
+    const latitude=Math.asin(point.y)*180/Math.PI;
+    const longitude=Math.atan2(point.x,point.z)*180/Math.PI;
+    const vertices=[];
+    for(let side=0;side<sides;side++)vertices.push(tangentPoint(point,latitude,longitude,radius,rotation+Math.PI*2*side/sides));
+    result.push({
+      point,
+      vertices,
+      shade:Math.floor(random()*terrainPalette.length),
+      alpha:.27+random()*.48
+    });
+  }
+  return result;
+}
+function createStars(){
+  const result=[];
+  const count=Math.min(230,Math.max(105,Math.round(viewportWidth*viewportHeight/5200)));
+  for(let i=0;i<count;i++){
+    result.push({x:random()*viewportWidth,y:random()*viewportHeight,r:.35+random()*1.15,alpha:.18+random()*.64,phase:random()*Math.PI*2});
+  }
+  return result;
+}
+function resizeCanvas(){
+  viewportWidth=window.innerWidth;
+  viewportHeight=window.innerHeight;
+  pixelRatio=Math.min(window.devicePixelRatio||1,2);
+  sectorCanvas.width=Math.round(viewportWidth*pixelRatio);
+  sectorCanvas.height=Math.round(viewportHeight*pixelRatio);
+  sectorCanvas.style.width=viewportWidth+'px';
+  sectorCanvas.style.height=viewportHeight+'px';
+  sectorContext.setTransform(pixelRatio,0,0,pixelRatio,0,0);
+  const radius=Math.min(viewportWidth*.39,viewportHeight*.305,310);
+  planet={x:viewportWidth/2,y:Math.max(radius+48,Math.min(viewportHeight*.455,viewportHeight-radius-158)),r:radius};
+  stars=createStars();
+  drawScene(performance.now());
+}
+function drawStars(time){
+  const ctx=sectorContext;
+  for(const star of stars){
+    const shimmer=.78+.22*Math.sin(time*.00055+star.phase);
+    ctx.globalAlpha=star.alpha*shimmer;
+    ctx.fillStyle=star.r>1?'#d9d0ff':'#fff';
+    ctx.beginPath();
+    ctx.arc(star.x,star.y,star.r,0,Math.PI*2);
+    ctx.fill();
+  }
+  ctx.globalAlpha=1;
+}
+function drawOrbit(){
+  const ctx=sectorContext;
+  ctx.save();
+  ctx.translate(planet.x,planet.y);
+  ctx.rotate(-.25);
+  ctx.strokeStyle='rgba(143,111,219,.16)';
+  ctx.lineWidth=1;
+  ctx.beginPath();
+  ctx.ellipse(0,0,planet.r*1.52,planet.r*.39,0,0,Math.PI*2);
+  ctx.stroke();
+  ctx.strokeStyle='rgba(109,79,184,.1)';
+  ctx.beginPath();
+  ctx.ellipse(0,0,planet.r*1.67,planet.r*.48,0,0,Math.PI*2);
+  ctx.stroke();
+  ctx.restore();
+}
+function drawAtmosphere(){
+  const ctx=sectorContext;
+  const r=planet.r;
+  const glow=ctx.createRadialGradient(planet.x,planet.y,r*.73,planet.x,planet.y,r*1.38);
+  glow.addColorStop(0,'rgba(126,71,255,0)');
+  glow.addColorStop(.44,'rgba(137,74,255,.02)');
+  glow.addColorStop(.61,'rgba(148,88,255,.28)');
+  glow.addColorStop(.76,'rgba(108,55,222,.24)');
+  glow.addColorStop(.9,'rgba(77,41,164,.1)');
+  glow.addColorStop(1,'rgba(67,37,142,0)');
+  ctx.fillStyle=glow;
+  ctx.fillRect(planet.x-r*1.5,planet.y-r*1.5,r*3,r*3);
+  ctx.save();
+  ctx.translate(planet.x,planet.y);
+  ctx.rotate(.43);
+  ctx.strokeStyle='rgba(178,135,255,.28)';
+  ctx.lineWidth=1.3;
+  ctx.beginPath();
+  ctx.ellipse(0,0,r*1.22,r*1.04,0,degrees(196),degrees(345));
+  ctx.stroke();
+  ctx.restore();
+}
+function drawPlanetBase(){
+  const ctx=sectorContext;
+  const r=planet.r;
+  ctx.save();
+  ctx.shadowColor='rgba(0,0,0,.8)';
+  ctx.shadowBlur=r*.22;
+  ctx.shadowOffsetY=r*.1;
+  const base=ctx.createRadialGradient(planet.x-r*.35,planet.y-r*.42,r*.03,planet.x+r*.08,planet.y+r*.15,r*1.13);
+  base.addColorStop(0,'#514365');
+  base.addColorStop(.29,'#3b304c');
+  base.addColorStop(.6,'#211c30');
+  base.addColorStop(.82,'#100d1a');
+  base.addColorStop(1,'#06050b');
+  ctx.fillStyle=base;
+  ctx.beginPath();
+  ctx.arc(planet.x,planet.y,r,0,Math.PI*2);
+  ctx.fill();
+  ctx.restore();
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(planet.x,planet.y,r,0,Math.PI*2);
+  ctx.clip();
+  drawTerrainFacets();
+  const shade=ctx.createRadialGradient(planet.x-r*.35,planet.y-r*.42,r*.02,planet.x+r*.18,planet.y+r*.16,r*1.15);
+  shade.addColorStop(0,'rgba(213,174,255,.13)');
+  shade.addColorStop(.42,'rgba(69,48,93,.03)');
+  shade.addColorStop(.72,'rgba(6,5,12,.16)');
+  shade.addColorStop(1,'rgba(0,0,0,.88)');
+  ctx.fillStyle=shade;
+  ctx.fillRect(planet.x-r,planet.y-r,r*2,r*2);
+  ctx.restore();
+  ctx.save();
+  const rim=ctx.createRadialGradient(planet.x-r*.35,planet.y-r*.35,r*.45,planet.x,planet.y,r*1.02);
+  rim.addColorStop(.76,'rgba(255,255,255,0)');
+  rim.addColorStop(.91,'rgba(168,122,255,.17)');
+  rim.addColorStop(.97,'rgba(160,98,255,.5)');
+  rim.addColorStop(1,'rgba(104,64,203,.13)');
+  ctx.fillStyle=rim;
+  ctx.beginPath();
+  ctx.arc(planet.x,planet.y,r,0,Math.PI*2);
+  ctx.fill();
+  ctx.strokeStyle='rgba(217,193,255,.32)';
+  ctx.lineWidth=1;
+  ctx.beginPath();
+  ctx.arc(planet.x,planet.y,r-.5,0,Math.PI*2);
+  ctx.stroke();
+  ctx.restore();
+}
+function drawTerrainFacets(){
+  const ctx=sectorContext;
+  for(const facet of facets){
+    const center=projectPoint(facet.point);
+    if(center.depth<-.02)continue;
+    const lit=Math.max(0,facet.point.x*-.42+facet.point.y*.5+facet.point.z*.76);
+    const alpha=facet.alpha*(.16+lit*.84)*Math.min(1,Math.max(.16,center.depth*2.2));
+    ctx.globalAlpha=alpha;
+    ctx.fillStyle=terrainPalette[facet.shade];
+    ctx.beginPath();
+    facet.vertices.forEach((vertex,index)=>{
+      const projected=projectPoint(vertex);
+      if(index===0)ctx.moveTo(projected.x,projected.y);else ctx.lineTo(projected.x,projected.y);
+    });
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.globalAlpha=1;
+}
+function pointInPolygon(point,polygon){
+  let inside=false;
+  for(let i=0,j=polygon.length-1;i<polygon.length;j=i){
+    const a=polygon[i];
+    const b=polygon[j];
+    const intersects=((a.y>point.y)!==(b.y>point.y))&&(point.x<(b.x-a.x)*(point.y-a.y)/(b.y-a.y+Number.EPSILON)+a.x);
+    if(intersects)inside=!inside;
+  }
+  return inside;
+}
+function sectorCorners(sector){
+  return sector.corners;
+}
+function drawSectorIcon(x,y,scale,type,color,alpha){
+  const ctx=sectorContext;
+  const size=scale;
+  ctx.save();
+  ctx.globalAlpha=alpha;
+  ctx.strokeStyle=color;
+  ctx.fillStyle=color;
+  ctx.lineWidth=Math.max(.8,size*.14);
+  ctx.lineJoin='round';
+  ctx.lineCap='round';
+  if(type===0){
+    ctx.beginPath();
+    ctx.rect(x-size*.55,y-size*.4,size*1.1,size*.8);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(x,y,size*.16,0,Math.PI*2);
+    ctx.fill();
+  }else if(type===1){
+    ctx.beginPath();
+    ctx.moveTo(x,y-size*.65);
+    ctx.lineTo(x+size*.56,y);
+    ctx.lineTo(x,y+size*.65);
+    ctx.lineTo(x-size*.56,y);
+    ctx.closePath();
+    ctx.stroke();
+  }else if(type===2){
+    ctx.beginPath();
+    ctx.arc(x,y,size*.45,0,Math.PI*2);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(x,y,size*.13,0,Math.PI*2);
+    ctx.fill();
+  }else if(type===3){
+    ctx.beginPath();
+    ctx.moveTo(x-size*.55,y-size*.35);
+    ctx.lineTo(x+size*.55,y-size*.35);
+    ctx.lineTo(x+size*.32,y+size*.4);
+    ctx.lineTo(x-size*.32,y+size*.4);
+    ctx.closePath();
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(x,y-size*.25);
+    ctx.lineTo(x,y+size*.3);
+    ctx.stroke();
+  }else{
+    ctx.beginPath();
+    ctx.moveTo(x-size*.55,y);
+    ctx.lineTo(x,y-size*.55);
+    ctx.lineTo(x+size*.55,y);
+    ctx.lineTo(x,y+size*.55);
+    ctx.closePath();
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(x,y,size*.13,0,Math.PI*2);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+function drawSectors(){
+  const ctx=sectorContext;
+  renderedSectors=[];
+  const visible=[];
+  for(const sector of sectors){
+    const center=projectPoint(sector.point);
+    if(center.depth<-.085)continue;
+    const corners=sectorCorners(sector).map(projectPoint);
+    visible.push({sector,center,corners});
+  }
+  visible.sort((a,b)=>a.center.depth-b.center.depth);
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(planet.x,planet.y,planet.r-.2,0,Math.PI*2);
+  ctx.clip();
+  for(const item of visible){
+    const {sector,center,corners}=item;
+    const selected=sector.key===selectedSectorKey;
+    const available=sector.state==='capturable';
+    const captured=sector.state==='captured';
+    const shown=available||captured||selected&&sector.state!=='locked';
+    const depthOpacity=Math.min(1,Math.max(.16,.24+(center.depth+.08)*.9));
+    ctx.globalAlpha=depthOpacity;
+    ctx.beginPath();
+    corners.forEach((corner,index)=>{
+      if(index===0)ctx.moveTo(corner.x,corner.y);else ctx.lineTo(corner.x,corner.y);
+    });
+    ctx.closePath();
+    if(!shown){
+      ctx.fillStyle='rgba(5,4,12,.43)';
+      ctx.fill();
+      continue;
+    }
+    let fill='rgba(111,100,147,.045)';
+    let stroke='rgba(209,199,243,.62)';
+    let lineWidth=.95;
+    let tint='#e8dfff';
+    if(captured){
+      fill='rgba(255,187,103,.075)';
+      stroke='rgba(255,201,127,.88)';
+      tint='#ffdba4';
+    }else if(available){
+      fill='rgba(145,113,216,.12)';
+      stroke='rgba(207,184,255,.92)';
+      tint='#ddc8ff';
+    }
+    if(selected){
+      fill=captured?'rgba(255,184,91,.34)':'rgba(255,184,91,.42)';
+      stroke='#ffe8b4';
+      lineWidth=2.2;
+      tint='#fff0ca';
+    }else{
+      lineWidth=sector.key?1.35:.95;
+    }
+    ctx.fillStyle=fill;
+    ctx.fill();
+    ctx.lineWidth=lineWidth;
+    ctx.strokeStyle=stroke;
+    if(selected){
+      ctx.shadowColor='rgba(255,174,89,.96)';
+      ctx.shadowBlur=17;
+    }else if(captured||available){
+      ctx.shadowColor=stroke;
+      ctx.shadowBlur=3.5;
+    }else{
+      ctx.shadowBlur=0;
+    }
+    ctx.stroke();
+    ctx.shadowBlur=0;
+    if(sector.key&&center.depth>.02){
+      const scale=5.4+Math.max(0,center.depth)*1.8;
+      drawSectorIcon(center.x,center.y,scale,sector.iconType,tint,Math.min(1,depthOpacity*.98));
+    }
+    if(selected){
+      ctx.globalAlpha=1;
+      ctx.strokeStyle='rgba(255,244,216,.92)';
+      ctx.lineWidth=1;
+      ctx.beginPath();
+      ctx.arc(center.x,center.y,3,0,Math.PI*2);
+      ctx.stroke();
+    }
+    renderedSectors.push({sector,center,polygon:corners.map(point=>({x:point.x,y:point.y})),depth:center.depth});
+  }
+  ctx.restore();
+  ctx.globalAlpha=1;
+}
+function drawScene(time){
+  if(!sectorContext)return;
+  const ctx=sectorContext;
+  ctx.clearRect(0,0,viewportWidth,viewportHeight);
+  drawStars(time);
+  drawOrbit();
+  drawAtmosphere();
+  drawPlanetBase();
+  drawSectors();
+  const vignette=ctx.createRadialGradient(viewportWidth/2,viewportHeight*.42,Math.min(viewportWidth,viewportHeight)*.2,viewportWidth/2,viewportHeight*.42,Math.max(viewportWidth,viewportHeight)*.78);
+  vignette.addColorStop(0,'rgba(0,0,0,0)');
+  vignette.addColorStop(1,'rgba(0,0,0,.22)');
+  ctx.fillStyle=vignette;
+  ctx.fillRect(0,0,viewportWidth,viewportHeight);
+}
+function animate(time){
+  if(document.getElementById('scr-sectors').classList.contains('show')&&time-lastDrawTime>32){
+    drawScene(time);
+    lastDrawTime=time;
+  }
+  animationFrame=requestAnimationFrame(animate);
+}
+function chooseSectorAt(x,y){
+  for(let i=renderedSectors.length-1;i>=0;i--){
+    const item=renderedSectors[i];
+    if(item.depth<-.025)continue;
+    if(item.sector.key&&(item.sector.state==='capturable'||item.sector.state==='captured')&&pointInPolygon({x,y},item.polygon)){
+      selectSector(item.sector.name,item.sector.state,item.sector.key);
+      return;
+    }
+  }
+}
+sectorCanvas.addEventListener('pointerdown',event=>{
+  if(!document.getElementById('scr-sectors').classList.contains('show'))return;
+  pointerState={id:event.pointerId,x:event.clientX,y:event.clientY,lastX:event.clientX,lastY:event.clientY,moved:false,yaw,pitch};
+  sectorCanvas.setPointerCapture(event.pointerId);
+  event.preventDefault();
+});
+sectorCanvas.addEventListener('pointermove',event=>{
+  if(!pointerState||event.pointerId!==pointerState.id)return;
+  const dx=event.clientX-pointerState.x;
+  const dy=event.clientY-pointerState.y;
+  if(Math.abs(dx)+Math.abs(dy)>5)pointerState.moved=true;
+  if(pointerState.moved){
+    yaw=pointerState.yaw+dx*.006;
+    pitch=Math.max(-1.05,Math.min(1.05,pointerState.pitch+dy*.004));
+    pointerState.lastX=event.clientX;
+    pointerState.lastY=event.clientY;
+  }
+  event.preventDefault();
+});
+function finishPointer(event){
+  if(!pointerState||event.pointerId!==pointerState.id)return;
+  const state=pointerState;
+  pointerState=null;
+  if(!state.moved)chooseSectorAt(event.clientX,event.clientY);
+}
+sectorCanvas.addEventListener('pointerup',finishPointer);
+sectorCanvas.addEventListener('pointercancel',()=>{pointerState=null;});
+window.addEventListener('resize',resizeCanvas,{passive:true});
+function showScreen(id){
+  document.querySelectorAll('.screen').forEach(screen=>screen.classList.remove('show'));
+  document.getElementById('scene').style.display='none';
+  document.getElementById('scr-'+id).classList.add('show');
+  if(id==='sectors')drawScene(performance.now());
+}
+function backToMenu(){
+  document.querySelectorAll('.screen').forEach(screen=>screen.classList.remove('show'));
+  document.getElementById('scene').style.display='flex';
+}
+function selectSector(name,state,key){
+  const matching=sectors.find(sector=>sector.key===key||sector.name===name);
+  if(!matching||matching.state==='locked'||matching.state==='neutral')return;
+  selectedSectorName=matching.name;
+  selectedSectorState=matching.state;
+  selectedSectorKey=matching.key;
+  document.getElementById('sector-index').textContent='#'+String(matching.sectorId).padStart(3,'0');
+  document.getElementById('sector-count').textContent='#'+String(matching.sectorId).padStart(3,'0');
+  document.getElementById('sel-name').textContent=sectorDisplayNames[matching.key]||matching.name;
+  renderSectorResources(matching);
+  const status=document.getElementById('sel-status');
+  const threat=document.getElementById('sel-threat');
+  const statsButton=document.getElementById('sector-info');
+  const action=document.getElementById('sel-action');
+  const actionIcon=document.getElementById('action-icon');
+  const actionLabel=document.getElementById('action-label');
+  status.className='sector-status';
+  if(matching.state==='capturable'){
+    status.textContent=matching.key==='ground-zero'?'Startsektor – bereit zur Landung.':'Freigeschaltet – bereit zur Landung.';
+    status.classList.add('capturable');
+    threat.textContent='Gefahr: '+(sectorThreats[matching.key]||'Unbekannt');
+    threat.hidden=false;
+    statsButton.hidden=true;
+    actionLabel.textContent='Start';
+    actionIcon.textContent='▶';
+    action.style.display='inline-flex';
+    action.disabled=false;
+  }else{
+    status.textContent='Erobert – Sektor gesichert.';
+    threat.hidden=true;
+    statsButton.hidden=false;
+    actionLabel.textContent='Hingehen';
+    actionIcon.textContent='▶';
+    action.style.display='inline-flex';
+    action.disabled=false;
+  }
+  drawScene(performance.now());
+}
+function launchSelectedSector(){
+  const sector=sectors.find(item=>item.key===selectedSectorKey);
+  if(sector&&sector.key==='ground-zero'){openGroundZeroGame();return;}
+  if(!sector||sector.state==='locked'||sector.state==='neutral')return;
+  if(sector.state==='captured'){
+    toast('Der Sektorwechsel ist in dieser visuellen Demo noch nicht verbunden.');
+    return;
+  }
+  completedSectorKeys.add(sector.key);
+  saveCampaignProgress();
+  refreshCampaignStates();
+  refreshResearchSectorLocks();
+  selectSector(sector.name,sector.state,sector.key);
+  const newlyUnlocked=sectors.filter(item=>item.state==='capturable'&&!completedSectorKeys.has(item.key));
+  toast(newlyUnlocked.length?'Demo-Abschluss simuliert. Neue Kampagnensektoren wurden freigeschaltet.':'Demo-Abschluss simuliert.');
+}
+
+const researchNodes=[
+  {id:'core-shard',name:'Kern: Splitter',short:'Startkern',category:'Kern',glyph:'⬡',color:'core',description:'Der Startkern der Serpulo-Kampagne. Forschungskosten werden aus dem globalen Inventar der eigenen Kerne bezahlt.',cost:[],parents:[],sector:null,x:46,y:318,root:true},
+  {id:'conveyor',name:'Förderband',short:'Transport',category:'Transport',glyph:'⇢',color:'copper',description:'Transportiert Gegenstände in eine Richtung und bildet die Grundlage für automatisierte Fabriken.',cost:[['Kupfer',5,'#de9659']],parents:['core-shard'],sector:null,x:255,y:75},
+  {id:'junction',name:'Kreuzung',short:'Transport',category:'Transport',glyph:'╳',color:'copper',description:'Lässt sich kreuzende Förderbänder überqueren, ohne ihren Warenfluss zu vermischen.',cost:[['Kupfer',100,'#de9659']],parents:['conveyor'],sector:null,x:465,y:75},
+  {id:'router',name:'Verteiler',short:'Transport',category:'Transport',glyph:'✣',color:'copper',description:'Verteilt eingehende Gegenstände gleichmäßig auf die drei Ausgangsseiten.',cost:[['Kupfer',100,'#de9659']],parents:['junction'],sector:null,x:675,y:75},
+  {id:'distributor',name:'Großverteiler',short:'Transport',category:'Transport',glyph:'✥',color:'lead',description:'Verteilt Gegenstände zu allen acht angrenzenden Ausgängen.',cost:[['Kupfer',100,'#de9659']],parents:['router'],sector:null,x:885,y:75},
+  {id:'mechanical-drill',name:'Mechanischer Bohrer',short:'Förderung',category:'Produktion',glyph:'⛏',color:'copper',description:'Fördert grundlegende Erze direkt aus geeigneten Erzfeldern. Benötigt keine Energie.',cost:[['Kupfer',10,'#de9659']],parents:['core-shard'],sector:null,x:255,y:205},
+  {id:'graphite-press',name:'Graphitpresse',short:'Verarbeitung',category:'Produktion',glyph:'▥',color:'graphite',description:'Verdichtet Kohle zu Graphit, das für fortgeschrittene Gebäude gebraucht wird.',cost:[['Kupfer',2400,'#de9659'],['Blei',900,'#aeb9ca']],parents:['mechanical-drill'],sector:null,x:465,y:205},
+  {id:'pneumatic-drill',name:'Pneumatischer Bohrer',short:'Förderung',category:'Produktion',glyph:'⛏',color:'graphite',description:'Ein verbesserter Bohrer mit höherer Förderrate, der auch Titan abbauen kann.',cost:[['Kupfer',500,'#de9659'],['Graphit',300,'#a99ad0']],parents:['graphite-press'],sector:'frozen-forest',x:675,y:205},
+  {id:'silicon-smelter',name:'Siliziumschmelze',short:'Verarbeitung',category:'Produktion',glyph:'◈',color:'silicon',description:'Stellt Silizium aus Sand und Kohle her. Für viele spätere Technologien wird Silizium benötigt.',cost:[['Kupfer',900,'#de9659'],['Blei',700,'#aeb9ca']],parents:['graphite-press'],sector:'frozen-forest',x:675,y:315},
+  {id:'kiln',name:'Brennofen',short:'Verarbeitung',category:'Produktion',glyph:'▤',color:'energy',description:'Schmilzt Sand und Blei zu Metaglas. Der Zugang zur Technologie ist an den Kratersektor gebunden.',cost:[['Kupfer',1900,'#de9659'],['Blei',900,'#aeb9ca'],['Graphit',900,'#a99ad0']],parents:['silicon-smelter'],sector:'cratered-battleground',x:885,y:315},
+  {id:'duo',name:'Duo',short:'Verteidigung',category:'Verteidigung',glyph:'✣',color:'defense',description:'Ein einfacher Geschützturm zur Verteidigung der Basis.',cost:[['Kupfer',50,'#de9659']],parents:['core-shard'],sector:null,x:255,y:430},
+  {id:'copper-wall',name:'Kupferwand',short:'Verteidigung',category:'Verteidigung',glyph:'▦',color:'copper',description:'Grundlegende Schutzwand für wichtige Gebäudestrukturen.',cost:[['Kupfer',20,'#de9659']],parents:['duo'],sector:null,x:465,y:430},
+  {id:'large-copper-wall',name:'Große Kupferwand',short:'Verteidigung',category:'Verteidigung',glyph:'▦',color:'copper',description:'Eine größere Wandvariante mit höherem Schutz für kompakte Verteidigungsanlagen.',cost:[['Kupfer',700,'#de9659']],parents:['copper-wall'],sector:null,x:675,y:430},
+  {id:'scatter',name:'Scatter',short:'Verteidigung',category:'Verteidigung',glyph:'✳',color:'defense',description:'Ein Turm für die Luftabwehr. Seine Geschosse können mehrere leichte Ziele treffen.',cost:[['Kupfer',100,'#de9659'],['Blei',70,'#aeb9ca']],parents:['duo'],sector:null,x:465,y:540},
+  {id:'hail',name:'Hagel',short:'Verteidigung',category:'Verteidigung',glyph:'⌁',color:'defense',description:'Eine Artillerie-Verteidigung mit größerer Reichweite. Benötigt den Abschluss des Kratersektors.',cost:[['Kupfer',1200,'#de9659'],['Graphit',500,'#a99ad0']],parents:['scatter'],sector:'cratered-battleground',x:675,y:540},
+  {id:'arc',name:'Lichtbogen',short:'Verteidigung',category:'Verteidigung',glyph:'ϟ',color:'defense',description:'Ein elektrischer Geschützturm gegen Bodenziele. Wird erst nach der Eroberung des Frostwalds verfügbar.',cost:[['Kupfer',500,'#de9659'],['Blei',500,'#aeb9ca']],parents:['duo'],sector:'frozen-forest',x:255,y:540},
+  {id:'combustion-generator',name:'Verbrennungsgenerator',short:'Energie',category:'Energie',glyph:'ϟ',color:'energy',description:'Erzeugt Energie durch das Verbrennen brennbarer Materialien. In der offiziellen Forschung wird auch die Kohlefreischaltung vorausgesetzt.',cost:[['Kupfer',700,'#de9659'],['Blei',400,'#aeb9ca']],parents:['mechanical-drill'],sector:null,extra:'Kohle muss zuvor als Ressource erforscht bzw. produziert werden.',x:255,y:315},
+  {id:'power-node',name:'Stromknoten',short:'Energie',category:'Energie',glyph:'⌘',color:'energy',description:'Leitet Energie zwischen verbundenen Gebäuden und Stromknoten weiter.',cost:[['Kupfer',100,'#de9659'],['Blei',200,'#aeb9ca']],parents:['combustion-generator'],sector:null,x:465,y:315},
+  {id:'battery',name:'Batterie',short:'Energie',category:'Energie',glyph:'▰',color:'energy',description:'Speichert überschüssige Energie und gibt sie bei Bedarf wieder ab.',cost:[['Kupfer',100,'#de9659'],['Blei',600,'#aeb9ca']],parents:['combustion-generator'],sector:null,x:885,y:430}
+];
+let selectedResearchId='conveyor';
+let researchFilter='Alle';
+function researchNodeStatus(node){
+  if(node.root)return {label:'FREIGESCHALTET',className:'researched',detail:'Diese Starttechnologie ist bereits Teil der Grundausstattung.'};
+  if(node.sector&&!completedSectorKeys.has(node.sector)){
+    const sector=sectorNames.find(item=>item.key===node.sector);
+    return {label:'SEKTOR ERFORDERLICH',className:'gated',detail:'Zuerst Sektor abschließen: '+(sector?sector.name:node.sector)+'.'};
+  }
+  const missingParents=node.parents.map(id=>researchNodes.find(item=>item.id===id)).filter(parent=>parent&&!parent.root);
+  if(missingParents.length){
+    return {label:'VORAUSSETZUNG FEHLT',className:'gated',detail:'Zuerst erforschen: '+missingParents.map(parent=>parent.name).join(', ')+'.'};
+  }
+  return {label:'BEREIT ZUR ERFORSCHUNG',className:'ready',detail:'Die direkten Voraussetzungen sind erfüllt. Für die Forschung werden Ressourcen aus dem Kerninventar benötigt.'};
+}
+function researchNodeIcon(node){return `<span class="research-glyph ${node.color||''}">${node.glyph}</span>`;}
+function renderResearchNodes(){
+  const canvas=document.getElementById('research-canvas');
+  canvas.querySelectorAll('.research-node').forEach(element=>element.remove());
+  const lines=document.getElementById('research-connections');
+  lines.innerHTML='';
+  const nodeMap=new Map(researchNodes.map(node=>[node.id,node]));
+  for(const node of researchNodes){
+    for(const parentId of node.parents){
+      const parent=nodeMap.get(parentId);
+      if(!parent)continue;
+      const line=document.createElementNS('http://www.w3.org/2000/svg','path');
+      const x1=parent.x+158,y1=parent.y+39,x2=node.x,y2=node.y+39,mid=(x1+x2)/2;
+      line.setAttribute('d',`M${x1} ${y1} C${mid} ${y1},${mid} ${y2},${x2} ${y2}`);
+      const gated=node.sector&&!completedSectorKeys.has(node.sector);
+      line.setAttribute('class','research-link'+(!gated&&parent.root?' available':''));
+      line.dataset.child=node.id;line.dataset.parent=parentId;
+      lines.appendChild(line);
+    }
+  }
+  for(const node of researchNodes){
+    const status=researchNodeStatus(node);
+    const button=document.createElement('button');
+    button.type='button';button.className='research-node '+(node.root?'researched':status.className==='gated'?'sector-gated locked':'available')+(node.id===selectedResearchId?' selected':'');
+    button.dataset.id=node.id;button.dataset.category=node.category;button.style.left=node.x+'px';button.style.top=node.y+'px';
+    button.innerHTML=`${researchNodeIcon(node)}<span class="research-node-copy"><strong>${node.name}</strong><small>${node.short}</small><span class="research-node-cost">${node.root?'Starttechnologie':node.cost.map(item=>`${item[1].toLocaleString('de-DE')} ${item[0]}`).join(' · ')}</span></span>`;
+    button.addEventListener('click',()=>selectResearch(node.id));
+    canvas.appendChild(button);
+  }
+  applyResearchFilters();
+}
+function renderResearchDetail(){
+  const node=researchNodes.find(item=>item.id===selectedResearchId)||researchNodes[0];
+  const status=researchNodeStatus(node);
+  const panel=document.getElementById('research-detail');
+  const costMarkup=node.cost.length?node.cost.map(item=>`<div class="research-cost-item"><span class="research-item-icon" style="--item-color:${item[2]}"></span><span>${item[0]}</span><strong class="research-cost-amount">${item[1].toLocaleString('de-DE')}</strong></div>`).join(''):'<div class="research-prereq">✓ Keine Forschungskosten · Grundtechnologie</div>';
+  const prereqs=node.parents.length?node.parents.map(parentId=>{const parent=researchNodes.find(item=>item.id===parentId);return `<div class="research-prereq"><span class="research-prereq-icon">◇</span><span>Benötigt: ${parent?parent.name:parentId}</span></div>`}).join(''):'<div class="research-prereq"><span class="research-prereq-icon">✓</span><span>Starttechnologie von Serpulo</span></div>';
+  const sector=node.sector?sectorNames.find(item=>item.key===node.sector):null;
+  const condition=node.sector?`<div class="research-prereq"><span class="research-prereq-icon">⌖</span><span>Sektor abschließen: ${sector?sector.name:node.sector}</span></div>`:'';
+  const extra=node.extra?`<div class="research-prereq"><span class="research-prereq-icon">ⓘ</span><span>${node.extra}</span></div>`:'';
+  panel.innerHTML=`<div class="research-detail-kicker">${node.category} · SERPULO</div><div class="research-detail-head">${researchNodeIcon(node)}<div><h3>${node.name}</h3><p>${node.root?'Grundtechnologie':'Forschungskosten gemäß Serpulo-Techbaum'}</p></div></div><div class="research-state ${status.className}">${status.label}</div><p class="research-description">${node.description} ${status.detail}</p><section class="research-detail-section"><h4>Forschungskosten</h4><div class="research-cost-list">${costMarkup}</div></section><section class="research-detail-section"><h4>Voraussetzungen</h4><div class="research-prereq-list">${prereqs}${condition}${extra}</div></section><div class="research-progress"><span></span></div><div class="research-progress-label">0 % abgeschlossen · Kerninventar nicht verfügbar</div><button class="research-unavailable" type="button" disabled>FORSCHUNG NOCH NICHT VERFÜGBAR</button>`;
+}
+function selectResearch(id){
+  if(!researchNodes.some(node=>node.id===id))return;
+  selectedResearchId=id;
+  document.querySelectorAll('.research-node').forEach(button=>button.classList.toggle('selected',button.dataset.id===id));
+  renderResearchDetail();
+}
+function applyResearchFilters(){
+  const term=(document.getElementById('research-search')?.value||'').trim().toLocaleLowerCase('de-DE');
+  document.querySelectorAll('.research-node').forEach(button=>{
+    const node=researchNodes.find(item=>item.id===button.dataset.id);
+    const categoryMatch=researchFilter==='Alle'||node.category===researchFilter;
+    const searchMatch=!term||(node.name+' '+node.description+' '+node.short).toLocaleLowerCase('de-DE').includes(term);
+    button.hidden=!(categoryMatch&&searchMatch);
+  });
+  const lines=document.getElementById('research-connections');
+  if(lines){
+    Array.from(lines.children).forEach(line=>{
+      const child=document.querySelector(`.research-node[data-id="${line.dataset.child}"]`);
+      const parent=document.querySelector(`.research-node[data-id="${line.dataset.parent}"]`);
+      line.style.display=child&&!child.hidden&&parent&&!parent.hidden?'':'none';
+    });
+  }
+}
+function setResearchFilter(filter,button){
+  researchFilter=filter;
+  document.querySelectorAll('.research-filter').forEach(item=>item.classList.toggle('active',item===button));
+  applyResearchFilters();
+}
+function searchResearch(value){applyResearchFilters();}
+function openResearchTree(){
+  const screen=document.getElementById('research-screen');
+  screen.classList.add('show');
+  screen.setAttribute('aria-hidden','false');
+  renderResearchNodes();
+  renderResearchDetail();
+  document.querySelector('.research-close').focus({preventScroll:true});
+}
+function closeResearchTree(){
+  const screen=document.getElementById('research-screen');
+  screen.classList.remove('show');
+  screen.setAttribute('aria-hidden','true');
+  document.getElementById('research-trigger')?.focus({preventScroll:true});
+}
+function refreshResearchSectorLocks(){
+  if(!document.getElementById('research-screen').classList.contains('show'))return;
+  renderResearchNodes();
+  renderResearchDetail();
+}
+
+function openModal(id){document.getElementById('ov-'+id).classList.add('show');}
+function closeModal(id){document.getElementById('ov-'+id).classList.remove('show');}
+function toggleSetting(element){
+  const on=element.classList.toggle('on');
+  element.setAttribute('aria-checked',String(on));
+}
+function toggleSettingKey(event,element){
+  if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSetting(element);}
+}
+document.querySelectorAll('.overlay').forEach(overlay=>{
+  overlay.addEventListener('click',event=>{
+    if(event.target===overlay)overlay.classList.remove('show');
+  });
+});
+window.addEventListener('keydown',event=>{
+  if(event.key==='Escape'){
+    if(document.getElementById('research-screen').classList.contains('show'))closeResearchTree();
+    document.querySelectorAll('.overlay.show').forEach(overlay=>overlay.classList.remove('show'));
+  }
+  if(event.key.toLowerCase()==='t'&&!event.repeat&&!event.ctrlKey&&!event.metaKey&&!event.altKey){
+    const active=document.getElementById('scr-sectors').classList.contains('show');
+    const target=event.target;
+    const typing=target&&(target.isContentEditable||['INPUT','TEXTAREA','SELECT'].includes(target.tagName));
+    if(active&&!typing){event.preventDefault();document.getElementById('research-screen').classList.contains('show')?closeResearchTree():openResearchTree();}
+  }
+});
+document.getElementById('research-screen').addEventListener('click',event=>{if(event.target.id==='research-screen')closeResearchTree();});
+function toast(message){
+  const element=document.getElementById('toast');
+  element.textContent=message;
+  element.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer=setTimeout(()=>element.classList.remove('show'),2200);
+}
+loadCampaignProgress();
+sectors=createSectors();
+refreshCampaignStates();
+facets=createFacets();
+aimAtSector('ground-zero');
+resizeCanvas();
+selectSector('Ground Zero','capturable','ground-zero');
+renderResearchNodes();
+renderResearchDetail();
+animationFrame=requestAnimationFrame(animate);
+</script>
+
+<script>
+/* Ground Zero renderer. The original .msav bytes are embedded so the map also loads from a local HTML file. */
+const GZ_MSAV_BASE64 = "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";
+const gzCanvas = document.getElementById('gz-map-canvas');
+const gzCtx = gzCanvas.getContext('2d', {alpha:false});
+const gzKeys = new Set();
+let gzMap = null;
+let gzRaster = null;
+let gzLoading = false;
+let gzLoadFailed = false;
+let gzFrameHandle = 0;
+let gzLastFrame = 0;
+let gzDpr = 1;
+let gzViewW = window.innerWidth;
+let gzViewH = window.innerHeight;
+let gzFitScale = 1;
+let gzZoom = 1;
+let gzTargetZoom = 1;
+let gzCameraX = 0;
+let gzCameraY = 0;
+const GZ_TILE = 8;
+
+class GZReader {
+  constructor(bytes,start,end){this.bytes=bytes;this.pos=start||0;this.end=end===undefined?bytes.length:end;}
+  need(n){if(n<0||this.pos+n>this.end)throw new Error('Unerwartetes Dateiende in Ground Zero (Offset '+this.pos+').');}
+  u8(){this.need(1);return this.bytes[this.pos++];}
+  i8(){const v=this.u8();return v>127?v-256:v;}
+  u16(){return (this.u8()<<8)|this.u8();}
+  i16(){const v=this.u16();return v>32767?v-65536:v;}
+  i32(){return (this.u8()*0x1000000)+(this.u8()<<16)+(this.u8()<<8)+this.u8();}
+  skip(n){this.need(n);this.pos+=n;}
+  utf(){const n=this.u16();this.need(n);const part=this.bytes.subarray(this.pos,this.pos+n);this.pos+=n;return new TextDecoder('utf-8').decode(part).replace(/\u0000/g,'');}
+  region(){const n=this.i32();if(n<0||this.pos+n>this.end)throw new Error('Ungültige Länge in der MSAV-Datei: '+n+'.');const start=this.pos;this.pos+=n;return new GZReader(this.bytes,start,start+n);}
+  skipChunk(){const n=this.i32();if(n<0)throw new Error('Ungültige Entity-Chunk-Länge.');this.skip(n);}
+}
+function gzParseContentHeader(r){
+  const mapped=r.u8();let blockNames=[];
+  for(let i=0;i<mapped;i++){
+    const type=r.i8();const total=r.u16();const names=[];
+    for(let j=0;j<total;j++)names.push(r.utf());
+    if(type===1)blockNames=names;
+  }
+  return blockNames;
+}
+function gzParseMapRegion(r,blockNames,version){
+  const width=r.u16(),height=r.u16(),count=width*height;
+  if(!width||!height||count>2000000)throw new Error('Ungültige Kartengröße: '+width+' × '+height+'.');
+  const floorIds=new Int32Array(count),overlayIds=new Int32Array(count),blockIds=new Int32Array(count);
+  for(let i=0;i<count;i++){
+    const floor=r.i16(),overlay=r.i16(),repeat=r.u8();
+    floorIds[i]=floor;overlayIds[i]=overlay;
+    for(let j=1;j<=repeat&&i+j<count;j++){floorIds[i+j]=floor;overlayIds[i+j]=overlay;}
+    i+=repeat;
+  }
+  for(let i=0;i<count;i++){
+    const id=r.i16(),packed=r.u8();
+    const hasEntity=(packed&1)!==0,hasData=(packed&4)!==0;
+    if(hasData)r.skip(7);
+    let isCenter=true;
+    if(hasEntity)isCenter=r.u8()!==0;
+    blockIds[i]=id;
+    if(hasEntity&&isCenter)r.skipChunk();
+    if(!hasEntity&&!hasData){
+      const repeat=r.u8();
+      for(let j=1;j<=repeat&&i+j<count;j++)blockIds[i+j]=id;
+      i+=repeat;
+    }
+  }
+  return {width,height,version,floorIds,overlayIds,blockIds,blockNames};
+}
+async function gzReadOriginalMap(){
+  if(!('DecompressionStream' in window))throw new Error('DecompressionStream wird in diesem Browser nicht unterstützt. Bitte aktualisiere deinen Browser.');
+  const binary=atob(GZ_MSAV_BASE64.replace(/\s/g,''));
+  const compressed=new Uint8Array(binary.length);
+  for(let i=0;i<binary.length;i++)compressed[i]=binary.charCodeAt(i);
+  const stream=new Blob([compressed]).stream().pipeThrough(new DecompressionStream('deflate'));
+  const raw=new Uint8Array(await new Response(stream).arrayBuffer());
+  const r=new GZReader(raw);
+  const header=String.fromCharCode(r.u8(),r.u8(),r.u8(),r.u8());
+  if(header!=='MSAV')throw new Error('Originaldatei besitzt keinen MSAV-Header.');
+  const version=r.i32();
+  if(version<11||version>13)throw new Error('Save-Version '+version+' wird nicht unterstützt (erwartet: 11–13).');
+  r.region(); // metadata
+  let blockNames;
+  if(version===11){
+    blockNames=gzParseContentHeader(r.region());
+    r.region(); // legacy patches
+  }else{
+    r.region(); // data patches
+    blockNames=gzParseContentHeader(r.region());
+  }
+  const map=gzParseMapRegion(r.region(),blockNames,version);
+  map.sourceSha='3bf3e51ed66ca6ba5ec0c00e6176c4d375dc186a';
+  return map;
+}
+function gzName(id){
+  if(!gzMap)return '—';
+  return gzMap.blockNames[id]||(id===-1?'(keine ID)':'Unbekannte ID '+id);
+}
+function gzHash(x,y,id){
+  let n=(Math.imul(x+11,374761393)+Math.imul(y+47,668265263)+Math.imul(id+5,1442695041))|0;
+  n=Math.imul(n^(n>>>13),1274126177);
+  return (n^(n>>>16))>>>0;
+}
+function gzShade(hex,amount){
+  const h=hex.replace('#','');
+  const r=parseInt(h.slice(0,2),16),g=parseInt(h.slice(2,4),16),b=parseInt(h.slice(4,6),16);
+  const f=v=>Math.max(0,Math.min(255,Math.round(v+amount))).toString(16).padStart(2,'0');
+  return '#'+f(r)+f(g)+f(b);
+}
+function gzFloorColor(name){
+  const n=(name||'').toLowerCase();
+  if(/deep-water|deepwater|water|tainted-water|cryofluid/.test(n))return '#28516a';
+  if(/slag|molten|magmarock|hotrock|magma/.test(n))return '#874a32';
+  if(/grass|moss|spore/.test(n))return '#365b46';
+  if(/sand|dune|dirt|regolith|salt/.test(n))return '#8a795c';
+  if(/ice|snow|frost/.test(n))return '#7796a5';
+  if(/dacite|basalt|shale/.test(n))return '#454b52';
+  if(/tar/.test(n))return '#453842';
+  if(/stone|rock|crater/.test(n))return '#555f63';
+  if(/arkycite|rhyolite/.test(n))return '#675b75';
+  return '#4a555b';
+}
+function gzOreColor(name){
+  const n=(name||'').toLowerCase();
+  if(!n||n==='air'||!n.includes('ore-'))return null;
+  if(n.includes('copper'))return '#c98744';
+  if(n.includes('lead'))return '#bac4c9';
+  if(n.includes('titanium'))return '#63c2d4';
+  if(n.includes('thorium'))return '#ac82dc';
+  if(n.includes('coal'))return '#303643';
+  if(n.includes('scrap'))return '#9fa6a5';
+  if(n.includes('beryllium'))return '#72b77b';
+  if(n.includes('tungsten'))return '#c0b8a6';
+  if(n.includes('oxide'))return '#dd8067';
+  if(n.includes('carbide'))return '#8f7cbb';
+  return '#c9bd91';
+}
+function gzIsAir(name,id){return id===0||!name||name.toLowerCase()==='air';}
+function gzNaturalBlock(name){return /(wall|rock|rocks|boulder|cliff|tree|pine|shale|stalagmite|spore-cluster|crater|sand-boulder|ice-boulder|snow-boulder)/.test((name||'').toLowerCase());}
+function gzDrawFloor(x,y,id,overlay){
+  const floorName=gzName(id),base=gzFloorColor(floorName),h=gzHash(x,y,id);
+  gzCtx.fillStyle=base;gzCtx.fillRect(x,y,GZ_TILE,GZ_TILE);
+  const n=(floorName||'').toLowerCase();
+  if(/water|cryofluid/.test(n)){
+    gzCtx.fillStyle=gzShade(base,18+(h%13));gzCtx.fillRect(x+1+(h%3),y+2+(h%4),3,1);
+    if((h&7)===0){gzCtx.fillStyle=gzShade(base,-13);gzCtx.fillRect(x+4,y+6,2,1);}
+  }else if(/hotrock|magma|slag/.test(n)){
+    gzCtx.fillStyle='#d2793e';gzCtx.fillRect(x+1+(h%4),y+1+((h>>>4)%5),1,1);
+    gzCtx.fillStyle='#ad5030';gzCtx.fillRect(x+5,y+4,2,1);
+  }else{
+    const dots=2+(h%4);
+    for(let k=0;k<dots;k++){
+      const d=gzHash(x/GZ_TILE+k+1,y/GZ_TILE+k+2,id+k);
+      gzCtx.fillStyle=gzShade(base,((d&1)?1:-1)*(9+((d>>>4)%20)));
+      gzCtx.fillRect(x+((d>>>8)%(GZ_TILE-1)),y+((d>>>16)%(GZ_TILE-1)),1+(d%5===0?1:0),1);
+    }
+    if(/stone|basalt|dacite|shale|rock/.test(n)&&(h%3===0)){
+      gzCtx.fillStyle=gzShade(base,-16);gzCtx.fillRect(x+1,y+5,3,1);
+    }
+  }
+  const ore=gzOreColor(gzName(overlay));
+  if(ore){
+    gzCtx.fillStyle=ore;gzCtx.fillRect(x+1+((h>>>3)%4),y+1+((h>>>9)%5),2,2);
+    gzCtx.fillRect(x+4,y+4+((h>>>13)%3),2,1);
+    if((h&3)===0)gzCtx.fillRect(x+2,y+6,1,1);
+  }
+}
+function gzDrawBlock(x,y,id){
+  const name=gzName(id),n=(name||'').toLowerCase();
+  if(gzIsAir(n,id))return;
+  const h=gzHash(x/GZ_TILE,y/GZ_TILE,id);
+  if(gzNaturalBlock(n)){
+    let base='#596164';
+    if(/sand|dune|dirt/.test(n))base='#817056';
+    else if(/ice|snow/.test(n))base='#7895a2';
+    else if(/spore/.test(n))base='#4d6b50';
+    else if(/basalt|shale/.test(n))base='#3d424a';
+    else if(/tree|pine/.test(n))base='#345c45';
+    gzCtx.fillStyle=base;gzCtx.fillRect(x,y,GZ_TILE,GZ_TILE);
+    gzCtx.fillStyle=gzShade(base,20);gzCtx.fillRect(x+1,y+1,5,1);gzCtx.fillRect(x+1,y+1,1,5);
+    gzCtx.fillStyle=gzShade(base,-18);gzCtx.fillRect(x+2,y+6,5,1);gzCtx.fillRect(x+6,y+2,1,5);
+    gzCtx.fillStyle=gzShade(base,(h&1)?-12:12);gzCtx.fillRect(x+2+(h%3),y+2+((h>>>4)%3),2,2);
+  }else if(/core/.test(n)){
+    gzCtx.fillStyle='#3c4b51';gzCtx.fillRect(x,y,GZ_TILE,GZ_TILE);
+    gzCtx.fillStyle='#d7ef79';gzCtx.fillRect(x+2,y+1,4,6);gzCtx.fillStyle='#7c8d46';gzCtx.fillRect(x+3,y+2,2,4);
+  }else{
+    gzCtx.fillStyle='#66737a';gzCtx.fillRect(x,y,GZ_TILE,GZ_TILE);
+    gzCtx.fillStyle='#9aa6ab';gzCtx.fillRect(x+1,y+1,6,1);gzCtx.fillRect(x+1,y+1,1,6);
+    gzCtx.fillStyle='#35424a';gzCtx.fillRect(x+2,y+3,4,3);
+    gzCtx.fillStyle=(h&1)?'#d0dbdf':'#87969d';gzCtx.fillRect(x+3,y+3,2,2);
+  }
+}
+function gzBuildRaster(){
+  const m=gzMap,off=document.createElement('canvas');
+  off.width=m.width*GZ_TILE;off.height=m.height*GZ_TILE;
+  const previous=gzCtx.canvas;
+  // The drawing helpers target gzCtx, so render the permanent raster through a temporary target context.
+  const rasterCtx=off.getContext('2d',{alpha:false});
+  gzRenderWithContext(rasterCtx);
+  gzRaster=off;
+}
+function gzRenderWithContext(targetCtx){
+  const m=gzMap,previous=gzCtx;
+  // This function is called once at load; temporarily redirect drawing to the raster context.
+  gzSetRenderContext(targetCtx);
+  for(let i=0;i<m.width*m.height;i++){
+    const x=i%m.width,worldY=Math.floor(i/m.width),screenY=m.height-1-worldY;
+    const px=x*GZ_TILE,py=screenY*GZ_TILE;
+    gzDrawFloor(px,py,m.floorIds[i],m.overlayIds[i]);
+    gzDrawBlock(px,py,m.blockIds[i]);
+  }
+  gzSetRenderContext(previous);
+}
+function gzSetRenderContext(context){
+  gzCtx=context;
+}
+function gzResize(){
+  gzViewW=window.innerWidth;gzViewH=window.innerHeight;
+  gzDpr=Math.min(window.devicePixelRatio||1,2);
+  gzCanvas.width=Math.round(gzViewW*gzDpr);gzCanvas.height=Math.round(gzViewH*gzDpr);
+  gzCanvas.style.width=gzViewW+'px';gzCanvas.style.height=gzViewH+'px';
+  if(gzMap){
+    gzFitScale=Math.min(gzViewW/(gzMap.width*GZ_TILE),gzViewH/(gzMap.height*GZ_TILE))*.88;
+    gzRenderFrame();
+  }
+}
+function gzClamp(value,min,max){return Math.max(min,Math.min(max,value));}
+function gzRenderFrame(){
+  if(!gzMap||!gzRaster)return;
+  const ctx=gzCanvas.getContext('2d',{alpha:false});
+  ctx.setTransform(gzDpr,0,0,gzDpr,0,0);
+  ctx.fillStyle='#090d11';ctx.fillRect(0,0,gzViewW,gzViewH);
+  const scale=gzFitScale*gzZoom;
+  ctx.imageSmoothingEnabled=false;
+  ctx.translate(gzViewW/2,gzViewH/2);
+  ctx.scale(scale,scale);
+  ctx.translate(-gzCameraX*GZ_TILE,-gzCameraY*GZ_TILE);
+  ctx.drawImage(gzRaster,0,0);
+  ctx.setTransform(gzDpr,0,0,gzDpr,0,0);
+  document.getElementById('gz-zoom-label').textContent=Math.round(gzZoom*100)+' %';
+}
+function gzFrame(time){
+  if(!document.getElementById('scr-groundzero').classList.contains('show')){gzLastFrame=time;gzFrameHandle=requestAnimationFrame(gzFrame);return;}
+  if(!gzMap||!gzRaster){gzFrameHandle=requestAnimationFrame(gzFrame);return;}
+  const dt=Math.min(.05,Math.max(0,(time-(gzLastFrame||time))/1000));gzLastFrame=time;
+  const zoomIn=(gzKeys.has('arrowup')||gzKeys.has('arrowright'))?1:0;
+  const zoomOut=(gzKeys.has('arrowdown')||gzKeys.has('arrowleft'))?1:0;
+  if(zoomIn!==zoomOut&&dt>0)gzTargetZoom=gzClamp(gzTargetZoom*Math.exp((zoomIn?1:-1)*.85*dt),.35,10);
+  const smoothing=1-Math.exp(-dt*10);
+  gzZoom+=(gzTargetZoom-gzZoom)*smoothing;
+  let dx=0,dy=0;
+  if(gzKeys.has('a'))dx-=1;if(gzKeys.has('d'))dx+=1;
+  if(gzKeys.has('w'))dy-=1;if(gzKeys.has('s'))dy+=1;
+  if(dx||dy){
+    const mag=Math.hypot(dx,dy);dx/=mag;dy/=mag;
+    const speed=14/Math.max(.45,gzZoom);
+    gzCameraX+=dx*speed*dt;gzCameraY+=dy*speed*dt;
+    if(gzMap){gzCameraX=gzClamp(gzCameraX,0,gzMap.width);gzCameraY=gzClamp(gzCameraY,0,gzMap.height);}
+  }
+  gzRenderFrame();
+  gzFrameHandle=requestAnimationFrame(gzFrame);
+}
+async function openGroundZeroGame(){
+  showScreen('groundzero');
+  gzKeys.clear();
+  if(!gzMap&&!gzLoading&&!gzLoadFailed)await gzLoadMap();
+  gzResize();
+  if(!gzFrameHandle)gzFrameHandle=requestAnimationFrame(gzFrame);
+}
+function closeGroundZeroGame(){
+  gzKeys.clear();
+  showScreen('sectors');
+}
+async function gzLoadMap(){
+  gzLoading=true;
+  const status=document.getElementById('gz-map-status');
+  const error=document.getElementById('gz-map-error');
+  error.hidden=true;
+  status.textContent='Originaldatei wird gelesen…';
+  try{
+    gzMap=await gzReadOriginalMap();
+    status.textContent='Original-Kacheln · Save v'+gzMap.version+' · eingebettet';
+    document.getElementById('gz-map-size').textContent=gzMap.width+' × '+gzMap.height;
+    gzCameraX=gzMap.width/2;gzCameraY=gzMap.height/2;
+    gzFitScale=Math.min(window.innerWidth/(gzMap.width*GZ_TILE),window.innerHeight/(gzMap.height*GZ_TILE))*.88;
+    gzZoom=1;gzTargetZoom=1;
+    // Build a cached map raster using a temporary canvas context.
+    const nativeCanvas=document.createElement('canvas');
+    nativeCanvas.width=gzMap.width*GZ_TILE;nativeCanvas.height=gzMap.height*GZ_TILE;
+    const nativeCtx=nativeCanvas.getContext('2d',{alpha:false});
+    const activeContext=gzCtx;
+    gzSetRenderContext(nativeCtx);
+    for(let i=0;i<gzMap.width*gzMap.height;i++){
+      const x=i%gzMap.width,worldY=Math.floor(i/gzMap.width),screenY=gzMap.height-1-worldY;
+      const px=x*GZ_TILE,py=screenY*GZ_TILE;
+      gzDrawFloor(px,py,gzMap.floorIds[i],gzMap.overlayIds[i]);
+      gzDrawBlock(px,py,gzMap.blockIds[i]);
+    }
+    gzSetRenderContext(activeContext);
+    gzRaster=nativeCanvas;
+    gzResize();
+    status.textContent='Original-Kacheln geladen · Save v'+gzMap.version;
+  }catch(err){
+    gzMap=null;gzRaster=null;gzLoadFailed=true;
+    status.textContent='Karte konnte nicht geladen werden';
+    error.textContent='Ground Zero konnte nicht aus der eingebetteten Originaldatei gelesen werden. '+(err&&err.message?err.message:String(err));
+    error.hidden=false;
+  }finally{gzLoading=false;}
+}
+window.addEventListener('keydown',function(event){
+  if(!document.getElementById('scr-groundzero').classList.contains('show'))return;
+  const key=event.key.toLowerCase();
+  if(['w','a','s','d','arrowup','arrowdown','arrowleft','arrowright'].includes(key)){
+    event.preventDefault();
+    if(!event.repeat&&['arrowup','arrowright'].includes(key))gzTargetZoom=gzClamp(gzTargetZoom*1.22,.35,10);
+    if(!event.repeat&&['arrowdown','arrowleft'].includes(key))gzTargetZoom=gzClamp(gzTargetZoom/1.22,.35,10);
+    gzKeys.add(key);
+  }
+  if(key==='escape'){event.preventDefault();closeGroundZeroGame();}
+});
+window.addEventListener('keyup',function(event){gzKeys.delete(event.key.toLowerCase());});
+window.addEventListener('blur',function(){gzKeys.clear();});
+window.addEventListener('resize',function(){if(document.getElementById('scr-groundzero').classList.contains('show'))gzResize();},{passive:true});
+</script>
+
+</body>
+</html>
