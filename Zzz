@@ -2477,7 +2477,7 @@ function gzFrame(time){
 async function openGroundZeroGame(){
   showScreen('groundzero');
   gzKeys.clear();
-  if(!gzMap&&!gzLoading&&!gzLoadFailed)await gzLoadMap();
+  if(!gzMap&&!gzLoading)await gzLoadMap();
   gzResize();
   if(!gzFrameHandle)gzFrameHandle=requestAnimationFrame(gzFrame);
 }
