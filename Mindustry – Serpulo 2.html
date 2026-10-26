@@ -2129,18 +2129,23 @@ function gzDrawCore(x,y,h){
   }
   if((h&1)===0){gzCtx.fillStyle='#ffe08a';gzCtx.fillRect(cx+4,cy-1,1,1);}
 }
-function gzComputeWallDarkness(map){
+async function gzComputeWallDarkness(map){
   const w=map.width,h=map.height,n=w*h;
   const isWall=new Uint8Array(n);
+  const yieldFrame=()=>new Promise(resolve=>requestAnimationFrame(()=>setTimeout(resolve,0)));
   for(let rawI=0;rawI<n;rawI++){
     const x=rawI%w,worldY=(rawI/w)|0,screenY=h-1-worldY;
     const id=map.blockIds[rawI],name=(gzName(id)||'').toLowerCase();
     isWall[x+screenY*w]=(!gzIsAir(name,id)&&gzNaturalBlock(name))?1:0;
+    if(rawI>0&&rawI%32768===0)await yieldFrame();
   }
   const dist=new Int32Array(n).fill(-1);
   const queue=new Int32Array(n);
   let qh=0,qt=0;
-  for(let i=0;i<n;i++){if(!isWall[i]){dist[i]=0;queue[qt++]=i;}}
+  for(let i=0;i<n;i++){
+    if(!isWall[i]){dist[i]=0;queue[qt++]=i;}
+    if(i>0&&i%32768===0)await yieldFrame();
+  }
   while(qh<qt){
     const i=queue[qh++],x=i%w,y=(i/w)|0,d=dist[i];
     for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){
@@ -2150,12 +2155,14 @@ function gzComputeWallDarkness(map){
       const ni=nx+ny*w;
       if(dist[ni]===-1){dist[ni]=d+1;queue[qt++]=ni;}
     }
+    if(qh%32768===0)await yieldFrame();
   }
   const factor=new Float32Array(n);
   for(let i=0;i<n;i++){
     if(!isWall[i]){factor[i]=1;continue;}
     const d=dist[i];
     factor[i]=d<0?.05:Math.max(.05,Math.pow(.62,d-1));
+    if(i>0&&i%32768===0)await yieldFrame();
   }
   return factor;
 }
@@ -2555,7 +2562,7 @@ function gzRenderFrame(){
   ctx.translate(gzViewW/2,gzViewH/2);
   ctx.scale(scale,scale);
   ctx.translate(-gzCameraX*GZ_TILE,-gzCameraY*GZ_TILE);
-  ctx.drawImage(gzRaster,0,0);
+  ctx.drawImage(gzRaster,0,0,gzMap.width*GZ_TILE,gzMap.height*GZ_TILE);
   const gzNow=performance.now();
   gzDrawPlacedBlocks(ctx,gzNow);
   gzDrawPlayer(ctx,gzNow);
@@ -2605,7 +2612,7 @@ function gzFrame(time){
 async function openGroundZeroGame(){
   showScreen('groundzero');
   gzKeys.clear();
-  if(!gzMap&&!gzLoading&&!gzLoadFailed)await gzLoadMap();
+  if(!gzMap&&!gzLoading)await gzLoadMap();
   gzResize();
   if(!gzFrameHandle)gzFrameHandle=requestAnimationFrame(gzFrame);
 }
@@ -2615,6 +2622,8 @@ function closeGroundZeroGame(){
 }
 async function gzLoadMap(){
   gzLoading=true;
+  gzLoadFailed=false;
+  const activeContext=gzCtx;
   const status=document.getElementById('gz-map-status');
   const error=document.getElementById('gz-map-error');
   error.hidden=true;
@@ -2626,13 +2635,20 @@ async function gzLoadMap(){
     gzCameraX=gzMap.width/2;gzCameraY=gzMap.height/2;
     gzCoreSpawn=null;gzPlayerReady=false;
     status.textContent='Verdunkelung wird berechnet…';
-    gzWallDarkness=gzComputeWallDarkness(gzMap);
+    gzWallDarkness=await gzComputeWallDarkness(gzMap);
     gzFitScale=Math.min(window.innerWidth/(gzMap.width*GZ_TILE),window.innerHeight/(gzMap.height*GZ_TILE))*.88;
     gzZoom=1;gzTargetZoom=1;
+    const worldWidth=gzMap.width*GZ_TILE;
+    const worldHeight=gzMap.height*GZ_TILE;
+    const pixelBudgetScale=Math.sqrt(4000000/Math.max(1,worldWidth*worldHeight));
+    const dimensionScale=Math.min(8192/worldWidth,8192/worldHeight);
+    const rasterScale=Math.min(1,pixelBudgetScale,dimensionScale);
     const nativeCanvas=document.createElement('canvas');
-    nativeCanvas.width=gzMap.width*GZ_TILE;nativeCanvas.height=gzMap.height*GZ_TILE;
+    nativeCanvas.width=Math.max(1,Math.round(worldWidth*rasterScale));
+    nativeCanvas.height=Math.max(1,Math.round(worldHeight*rasterScale));
     const nativeCtx=nativeCanvas.getContext('2d',{alpha:false});
-    const activeContext=gzCtx;
+    if(!nativeCtx)throw new Error('Der Karten-Canvas konnte nicht initialisiert werden.');
+    nativeCtx.scale(rasterScale,rasterScale);
     gzSetRenderContext(nativeCtx);
     const total=gzMap.width*gzMap.height;
     const CHUNK=2000;
@@ -2664,11 +2680,15 @@ async function gzLoadMap(){
     gzResize();
     status.textContent='Original-Kacheln geladen · Save v'+gzMap.version;
   }catch(err){
-    gzMap=null;gzRaster=null;gzLoadFailed=true;
+    gzSetRenderContext(activeContext);
+    gzMap=null;gzRaster=null;gzWallDarkness=null;gzPlayerReady=false;gzLoadFailed=true;
     status.textContent='Karte konnte nicht geladen werden';
     error.textContent='Ground Zero konnte nicht aus der eingebetteten Originaldatei gelesen werden. '+(err&&err.message?err.message:String(err));
     error.hidden=false;
-  }finally{gzLoading=false;}
+  }finally{
+    gzSetRenderContext(activeContext);
+    gzLoading=false;
+  }
 }
 window.addEventListener('keydown',function(event){
   if(!document.getElementById('scr-groundzero').classList.contains('show'))return;
