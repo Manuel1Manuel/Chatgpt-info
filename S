@@ -216,15 +216,7 @@ let shouldClearConsole = false;
 let breakRequested = false;
 let loopDepth = 0;
 
-/*
- * Schneller Ersatz für "await new Promise(r=>setTimeout(r,0))".
- * Browser bremsen verschachtelte setTimeout(...,0)-Aufrufe künstlich aus
- * (häufig auf ~4ms pro Aufruf), obwohl 0ms gemeint ist. Ein MessageChannel-
- * Postfach löst dieselbe Aufgabe (Kontrolle kurz an den Browser abgeben,
- * damit UI/Stopp-Knopf reagieren) als "echte" Mikro-Pause ohne diese
- * künstliche Bremse. Verhalten/Häufigkeit der Pausen bleibt unverändert,
- * nur der Pausen-Mechanismus selbst ist schneller.
- */
+
 const fastYield = (() => {
   if(typeof MessageChannel==="undefined"){
     return () => new Promise(resolve=>setTimeout(resolve,0));
@@ -514,17 +506,7 @@ function evaluateCondition(condition){
   }
 }
 
-/*
- * parseValue() und evaluateCondition() oben machen bei JEDER Ausführung
- * dieselben Regex-Prüfungen neu – bei einer Schleife mit tausenden
- * Durchläufen wird also derselbe Text immer wieder neu analysiert.
- * Da ein Programm-Knoten (node) nach dem Parsen unverändert bleibt und
- * bei Schleifen mehrfach wiederverwendet wird, kann das Ergebnis der
- * Analyse direkt am Knoten zwischengespeichert werden: identische
- * Fehlermeldungen, identischer Zeitpunkt der Fehler (erst bei
- * tatsächlicher Ausführung, nicht beim Parsen) – nur ohne wiederholte
- * Regex-Arbeit bei wiederholten Durchläufen.
- */
+
 function compileToken(raw){
   const token = String(raw).trim();
 
@@ -1500,11 +1482,11 @@ function insertEditorText(text,cursorPosition){
 }
 
 function findCondition(line){
-  return /((?:else\s*)?if|while)\s*([a-z_$][a-z_$]*)\s*(==|!=|>=|<=|=|>|<)\s*([a-z_$][a-z_$]*|[-+]?(?:\d+(?:\.\d*)?|\.\d+))/i.exec(line);
+  return /((?:else\s*)?if|elseif|while)\s*([a-z_$][a-z_$]*)\s*(==|!=|>=|<=|=|>|<)\s*([a-z_$][a-z_$]*|[-+]?(?:\d+(?:\.\d*)?|\.\d+))/i.exec(line);
 }
 
 function findIncompleteCondition(line){
-  return /((?:else\s*)?if|while)\s*([a-z_$][a-z_$]*)\s*(==|!=|>=|<=|=|>|<)\s*$/i.exec(line);
+  return /((?:else\s*)?if|elseif|while)\s*([a-z_$][a-z_$]*)\s*(==|!=|>=|<=|=|>|<)\s*$/i.exec(line);
 }
 
 function addMissingConditionDeclarations(line,conditionMatch){
@@ -1636,7 +1618,7 @@ function autoOpenBlockBeforeCommand(){
   const info = getCurrentLineInfo();
 
   const match = info.line.match(
-    /((?:else\s*)?if|while)\s*([a-z_$][a-z_$]*)\s*(==|!=|>=|<=|=|>|<)\s*([-+]?\d+(?:\.\d+)?)([gptcms])$/i
+    /((?:else\s*)?if|elseif|while)\s*([a-z_$][a-z_$]*)\s*(==|!=|>=|<=|=|>|<)\s*([-+]?(?:\d+(?:\.\d*)?|\.\d+))([a-z])$/i
   );
 
   if(!match) return;
