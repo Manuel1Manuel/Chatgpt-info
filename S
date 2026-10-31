@@ -1,0 +1,1835 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Blocklang Studio</title>
+<style>
+:root{
+  --bg:#17181c;
+  --border:#393c44;
+  --text:#f1f2f5;
+  --accent:#7456e8;
+}
+*{box-sizing:border-box}
+html,body{width:100%;height:100%;margin:0}
+body{
+  background:var(--bg);
+  color:var(--text);
+  font-family:Arial,Helvetica,sans-serif;
+  overflow:hidden;
+}
+#app{
+  display:flex;
+  width:100%;
+  height:100%;
+  min-height:0;
+  gap:10px;
+  padding:10px;
+}
+#left{
+  display:flex;
+  flex:0 0 40%;
+  min-width:290px;
+  min-height:0;
+  flex-direction:column;
+  gap:9px;
+}
+#editor{
+  flex:1;
+  min-height:100px;
+  width:100%;
+  resize:none;
+  border:1px solid var(--border);
+  border-radius:6px;
+  padding:12px;
+  background:#101115;
+  color:#f4f4f4;
+  outline:none;
+  font:14px/1.55 Consolas,"Courier New",monospace;
+  tab-size:4;
+  white-space:pre;
+  overflow:auto;
+}
+#editor:focus{border-color:var(--accent)}
+#buttons{
+  display:flex;
+  flex-wrap:wrap;
+  gap:6px;
+}
+button{
+  border:0;
+  border-radius:5px;
+  padding:9px 12px;
+  background:#353842;
+  color:#fff;
+  font-size:13px;
+  cursor:pointer;
+}
+button:hover{filter:brightness(1.15)}
+button:active{filter:brightness(.9)}
+#run{background:var(--accent)}
+#stop{background:#a73737}
+#console{
+  flex:0 0 120px;
+  min-height:55px;
+  margin:0;
+  border:1px solid var(--border);
+  border-radius:6px;
+  padding:9px;
+  background:#101115;
+  color:#d5d8df;
+  overflow:auto;
+  white-space:pre-wrap;
+  overflow-wrap:anywhere;
+  font:12px/1.45 Consolas,"Courier New",monospace;
+}
+#console-row{
+  display:flex;
+  flex:0 0 38px;
+  gap:6px;
+}
+#console-input{
+  flex:1;
+  min-width:0;
+  border:1px solid var(--border);
+  border-radius:5px;
+  outline:none;
+  padding:8px 10px;
+  background:#101115;
+  color:#fff;
+  font:13px Consolas,"Courier New",monospace;
+}
+#console-input:focus{border-color:var(--accent)}
+#enter{background:var(--accent);min-width:58px}
+#right{
+  display:flex;
+  flex:1;
+  min-width:0;
+  min-height:0;
+  align-items:center;
+  justify-content:center;
+}
+#stage{
+  width:100%;
+  height:auto;
+  max-width:100%;
+  max-height:100%;
+  aspect-ratio:1/1;
+  background:#000;
+  border:1px solid #303039;
+  position:relative;
+  overflow:hidden;
+}
+#canvas{
+  display:block;
+  width:100%;
+  height:100%;
+  background:#000;
+  image-rendering:pixelated;
+  image-rendering:crisp-edges;
+}
+#pos-label{
+  position:absolute;
+  right:7px;
+  bottom:6px;
+  padding:3px 5px;
+  background:rgba(0,0,0,.65);
+  color:#bfc3ca;
+  pointer-events:none;
+  font:11px Consolas,"Courier New",monospace;
+}
+@media(max-width:760px){
+  body{overflow:auto}
+  #app{
+    height:auto;
+    min-height:100%;
+    flex-direction:column-reverse;
+    overflow:visible;
+  }
+  #right{flex:none;width:100%}
+  #stage{width:min(100%,70vh);height:auto}
+  #left{
+    flex:none;
+    width:100%;
+    min-width:0;
+    height:65vh;
+  }
+  #editor{flex:1}
+}
+</style>
+</head>
+<body>
+<div id="app">
+  <section id="left">
+    <textarea id="editor" spellcheck="false" autocapitalize="off" autocomplete="off"></textarea>
+
+    <div id="buttons">
+      <button id="run">Ausführen</button>
+      <button id="stop">Stopp</button>
+      <button id="copy-console">Konsole kopieren</button>
+      <button id="copy-code">Code kopieren</button>
+    </div>
+
+    <pre id="console">bereit</pre>
+
+    <div id="console-row">
+      <input id="console-input" type="text" autocomplete="off" spellcheck="false">
+      <button id="enter">Enter</button>
+    </div>
+  </section>
+
+  <section id="right">
+    <div id="stage">
+      <canvas id="canvas" width="1000" height="1000"></canvas>
+      <div id="pos-label">x: 0, y: 0</div>
+    </div>
+  </section>
+</div>
+
+<script>
+const editor = document.getElementById("editor");
+const runButton = document.getElementById("run");
+const stopButton = document.getElementById("stop");
+const consoleButton = document.getElementById("copy-console");
+const codeButton = document.getElementById("copy-code");
+const consoleElement = document.getElementById("console");
+const consoleInput = document.getElementById("console-input");
+const enterButton = document.getElementById("enter");
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d",{willReadFrequently:true});
+const positionLabel = document.getElementById("pos-label");
+
+ctx.imageSmoothingEnabled = false;
+
+let variables = Object.create(null);
+let px = 0;
+let py = 0;
+let penColor = 1;
+let penWidth = 1;
+let penIsOn = true;
+let running = false;
+let stopped = false;
+let executionSteps = 0;
+let outputLines = [];
+let shouldClearConsole = false;
+let breakRequested = false;
+let loopDepth = 0;
+
+/*
+ * Schneller Ersatz für "await new Promise(r=>setTimeout(r,0))".
+ * Browser bremsen verschachtelte setTimeout(...,0)-Aufrufe künstlich aus
+ * (häufig auf ~4ms pro Aufruf), obwohl 0ms gemeint ist. Ein MessageChannel-
+ * Postfach löst dieselbe Aufgabe (Kontrolle kurz an den Browser abgeben,
+ * damit UI/Stopp-Knopf reagieren) als "echte" Mikro-Pause ohne diese
+ * künstliche Bremse. Verhalten/Häufigkeit der Pausen bleibt unverändert,
+ * nur der Pausen-Mechanismus selbst ist schneller.
+ */
+const fastYield = (() => {
+  if(typeof MessageChannel==="undefined"){
+    return () => new Promise(resolve=>setTimeout(resolve,0));
+  }
+
+  const channel = new MessageChannel();
+  const queue = [];
+
+  channel.port1.onmessage = () => {
+    const resolve = queue.shift();
+    if(resolve) resolve();
+  };
+
+  return () => new Promise(resolve=>{
+    queue.push(resolve);
+    channel.port2.postMessage(null);
+  });
+})();
+
+function writeConsole(text){
+  consoleElement.textContent = String(text);
+  consoleElement.scrollTop = consoleElement.scrollHeight;
+}
+
+function addOutput(text){
+  outputLines.push(String(text));
+  if(outputLines.length > 1500){
+    outputLines = outputLines.slice(-1500);
+  }
+}
+
+function roundNumber(value){
+  return Math.round(value*1000)/1000;
+}
+
+function clamp(value,min,max){
+  return Math.max(min,Math.min(max,value));
+}
+
+function updatePosition(){
+  positionLabel.textContent =
+    "x: "+roundNumber(px)+", y: "+roundNumber(py);
+}
+
+function canvasPoint(x,y){
+  return {
+    x:clamp(Math.round(Number(x)*10),0,999),
+    y:clamp(Math.round((100-Number(y))*10),0,999)
+  };
+}
+
+function clearCanvas(){
+  ctx.fillStyle = "#000000";
+  ctx.fillRect(0,0,1000,1000);
+}
+
+function hslToRgb(color){
+  const match = String(color).match(
+    /^hsl\(\s*([-+]?(?:\d+(?:\.\d*)?|\.\d+))\s*,\s*100%\s*,\s*50%\s*\)$/i
+  );
+
+  if(!match){
+    throw new Error("Ungültige Stiftfarbe.");
+  }
+
+  const hue = ((Number(match[1])%360)+360)%360;
+  const h = hue/60;
+  const x = 255*(1-Math.abs(h%2-1));
+
+  let r = 0;
+  let g = 0;
+  let b = 0;
+
+  if(h<1){
+    r=255;
+    g=x;
+  }else if(h<2){
+    r=x;
+    g=255;
+  }else if(h<3){
+    g=255;
+    b=x;
+  }else if(h<4){
+    g=x;
+    b=255;
+  }else if(h<5){
+    r=x;
+    b=255;
+  }else{
+    r=255;
+    b=x;
+  }
+
+  return {
+    r:Math.round(r),
+    g:Math.round(g),
+    b:Math.round(b)
+  };
+}
+
+function colorForPen(value){
+  const number = Number(value);
+
+  if(number===0||number===1||number===100){
+    return "hsl(0,100%,50%)";
+  }
+
+  const hue = ((number-1)/99)*360;
+  return "hsl("+hue+",100%,50%)";
+}
+
+function drawPixelLine(x1,y1,x2,y2,width,color){
+  const a = canvasPoint(x1,y1);
+  const b = canvasPoint(x2,y2);
+  const w = clamp(Math.round(width),1,1000);
+
+  if(w>=1000){
+    ctx.fillStyle = color;
+    ctx.fillRect(0,0,1000,1000);
+    return;
+  }
+
+  const radius = Math.max(0.5,w/2);
+  const radiusSq = radius*radius;
+  const minX = clamp(Math.floor(Math.min(a.x,b.x)-radius-1),0,999);
+  const maxX = clamp(Math.ceil(Math.max(a.x,b.x)+radius+1),0,999);
+  const minY = clamp(Math.floor(Math.min(a.y,b.y)-radius-1),0,999);
+  const maxY = clamp(Math.ceil(Math.max(a.y,b.y)+radius+1),0,999);
+
+  const boxWidth = maxX-minX+1;
+  const boxHeight = maxY-minY+1;
+  const image = ctx.getImageData(minX,minY,boxWidth,boxHeight);
+  const data = image.data;
+
+  const dx = b.x-a.x;
+  const dy = b.y-a.y;
+  const lengthSq = dx*dx+dy*dy;
+  const rgb = hslToRgb(color);
+  const length = Math.sqrt(lengthSq);
+  const extension = length>0 ? radius/length : 0;
+
+  for(let yy=0;yy<boxHeight;yy++){
+    for(let xx=0;xx<boxWidth;xx++){
+      const sx = minX+xx+0.5;
+      const sy = minY+yy+0.5;
+      let t = 0;
+
+      if(lengthSq>0){
+        t = ((sx-a.x)*dx+(sy-a.y)*dy)/lengthSq;
+      }
+
+      if(t < -extension || t > 1+extension) continue;
+
+      const nx = a.x+t*dx;
+      const ny = a.y+t*dy;
+      const rx = sx-nx;
+      const ry = sy-ny;
+
+      if(rx*rx+ry*ry<=radiusSq){
+        const i = (yy*boxWidth+xx)*4;
+        data[i] = rgb.r;
+        data[i+1] = rgb.g;
+        data[i+2] = rgb.b;
+        data[i+3] = 255;
+      }
+    }
+  }
+
+  ctx.putImageData(image,minX,minY);
+}
+
+function gotoPosition(x,y){
+  const nx = Number(x);
+  const ny = Number(y);
+
+  if(!Number.isFinite(nx)||!Number.isFinite(ny)){
+    throw new Error("Ungültige Koordinaten.");
+  }
+
+  const nextX = clamp(nx,0,100);
+  const nextY = clamp(ny,0,100);
+
+  if(penIsOn){
+    drawPixelLine(px,py,nextX,nextY,penWidth,colorForPen(penColor));
+  }
+
+  px = nextX;
+  py = nextY;
+  updatePosition();
+}
+
+function setPenColor(number){
+  let value = Number(number);
+
+  if(value===0){
+    value=100;
+  }
+
+  if(!Number.isFinite(value)||value<1||value>100){
+    throw new Error("Stiftfarbe muss zwischen 1 und 100 liegen.");
+  }
+
+  penColor = value;
+}
+
+function setPenWidth(number){
+  const value = Math.trunc(Number(number));
+
+  if(!Number.isFinite(value)||value<1||value>1000){
+    throw new Error("Stiftdicke muss zwischen 1 und 1000 liegen.");
+  }
+
+  penWidth = value;
+}
+
+function getVariable(name){
+  const key = String(name).toLowerCase();
+
+  if(key==="x") return px;
+  if(key==="y") return py;
+
+  if(!Object.prototype.hasOwnProperty.call(variables,key)){
+    throw new Error("Variable nicht deklariert: "+key);
+  }
+
+  return variables[key];
+}
+
+function setVariable(name,value){
+  const key = String(name).toLowerCase();
+
+  if(key==="x"||key==="y"){
+    throw new Error("x und y sind schreibgeschützte Positionswerte.");
+  }
+
+  if(!Object.prototype.hasOwnProperty.call(variables,key)){
+    throw new Error("Variable nicht deklariert: "+key);
+  }
+
+  variables[key] = value;
+}
+
+function parseValue(value){
+  const token = String(value).trim();
+
+  if(/^[-+]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(token)){
+    return Number(token);
+  }
+
+  if(/^true$/i.test(token)) return true;
+  if(/^false$/i.test(token)) return false;
+
+  if(/^[a-z_$][a-z_$]*$/i.test(token)){
+    return getVariable(token);
+  }
+
+  throw new Error("Ungültiger Wert: "+token);
+}
+
+function evaluateCondition(condition){
+  const token = String(condition).trim();
+
+  if(/^true$/i.test(token)) return true;
+  if(/^false$/i.test(token)) return false;
+
+  const match = token.match(
+    /^([a-z_$][a-z_$]*)\s*(==|=|!=|>=|<=|>|<)\s*([a-z_$][a-z_$]*|[-+]?(?:\d+(?:\.\d*)?|\.\d+)|true|false)$/i
+  );
+
+  if(!match){
+    throw new Error("Ungültige Bedingung: "+condition);
+  }
+
+  const left = getVariable(match[1].toLowerCase());
+  const right = parseValue(match[3]);
+  const operator = match[2];
+
+  switch(operator){
+    case "=":
+    case "==": return left===right;
+    case "!=": return left!==right;
+    case ">": return left>right;
+    case "<": return left<right;
+    case ">=": return left>=right;
+    case "<=": return left<=right;
+    default: return false;
+  }
+}
+
+/*
+ * parseValue() und evaluateCondition() oben machen bei JEDER Ausführung
+ * dieselben Regex-Prüfungen neu – bei einer Schleife mit tausenden
+ * Durchläufen wird also derselbe Text immer wieder neu analysiert.
+ * Da ein Programm-Knoten (node) nach dem Parsen unverändert bleibt und
+ * bei Schleifen mehrfach wiederverwendet wird, kann das Ergebnis der
+ * Analyse direkt am Knoten zwischengespeichert werden: identische
+ * Fehlermeldungen, identischer Zeitpunkt der Fehler (erst bei
+ * tatsächlicher Ausführung, nicht beim Parsen) – nur ohne wiederholte
+ * Regex-Arbeit bei wiederholten Durchläufen.
+ */
+function compileToken(raw){
+  const token = String(raw).trim();
+
+  if(/^[-+]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(token)){
+    return {kind:"num",data:Number(token)};
+  }
+
+  if(/^true$/i.test(token)) return {kind:"bool",data:true};
+  if(/^false$/i.test(token)) return {kind:"bool",data:false};
+
+  if(/^[a-z_$][a-z_$]*$/i.test(token)){
+    return {kind:"var",data:token.toLowerCase()};
+  }
+
+  return {kind:"error",data:token};
+}
+
+function resolveCompiledToken(compiled){
+  switch(compiled.kind){
+    case "num":
+    case "bool":
+      return compiled.data;
+    case "var":
+      return getVariable(compiled.data);
+    default:
+      throw new Error("Ungültiger Wert: "+compiled.data);
+  }
+}
+
+function compileCondition(raw){
+  const token = String(raw).trim();
+
+  if(/^true$/i.test(token)) return {mode:"literal",data:true};
+  if(/^false$/i.test(token)) return {mode:"literal",data:false};
+
+  const match = token.match(
+    /^([a-z_$][a-z_$]*)\s*(==|=|!=|>=|<=|>|<)\s*([a-z_$][a-z_$]*|[-+]?(?:\d+(?:\.\d*)?|\.\d+)|true|false)$/i
+  );
+
+  if(!match){
+    return {mode:"error",data:token};
+  }
+
+  return {
+    mode:"compare",
+    leftName:match[1].toLowerCase(),
+    operator:match[2],
+    right:compileToken(match[3])
+  };
+}
+
+function evaluateCompiledCondition(compiled){
+  if(compiled.mode==="literal") return compiled.data;
+
+  if(compiled.mode==="error"){
+    throw new Error("Ungültige Bedingung: "+compiled.data);
+  }
+
+  const left = getVariable(compiled.leftName);
+  const right = resolveCompiledToken(compiled.right);
+
+  switch(compiled.operator){
+    case "=":
+    case "==": return left===right;
+    case "!=": return left!==right;
+    case ">": return left>right;
+    case "<": return left<right;
+    case ">=": return left>=right;
+    case "<=": return left<=right;
+    default: return false;
+  }
+}
+
+function decodeCompactPrefix(prefix,candidates){
+  if(!prefix) return [];
+
+  const text = String(prefix).toLowerCase();
+  const names = [...new Set(candidates.map(name=>String(name).toLowerCase()))]
+    .filter(name=>/^[a-z_$][a-z_$]*$/.test(name))
+    .sort((a,b)=>b.length-a.length);
+
+  function search(position,result){
+    if(position===text.length){
+      return result;
+    }
+
+    for(const name of names){
+      const token = name+"0";
+
+      if(text.startsWith(token,position)){
+        const found = search(
+          position+token.length,
+          result.concat([{type:"declare",name,value:0}])
+        );
+
+        if(found) return found;
+      }
+    }
+
+    return null;
+  }
+
+  return search(0,[]) || [];
+}
+
+function getDeclaredNames(source){
+  const names = new Set();
+  const lines = String(source).split(/\r?\n/);
+
+  for(const line of lines){
+    let match;
+
+    const spaced = /([a-z_$][a-z_$]*)[ \t]+([-+]?(?:\d+(?:\.\d*)?|\.\d+))/ig;
+
+    while((match=spaced.exec(line))!==null){
+      names.add(match[1].toLowerCase());
+    }
+
+    const compactEnd =
+      /(?:^|[;\s])([a-z_$][a-z_$]*)0(?=$|[;\s{}]|(?:penon|penoff|pensize|pencolor|color|thickness|penwidth|goto|move|clear|stop|cls|break|print))/ig;
+
+    while((match=compactEnd.exec(line))!==null){
+      names.add(match[1].toLowerCase());
+    }
+
+    const compactCondition =
+      /(else\s*if|if|while)\s*([a-z_$][a-z_$]*)\s*(==|!=|>=|<=|=|>|<)\s*([a-z_$][a-z_$]*|[-+]?(?:\d+(?:\.\d*)?|\.\d+))/ig;
+
+    while((match=compactCondition.exec(line))!==null){
+      let prefix = line.slice(0,match.index);
+      prefix = prefix.replace(/^.*\belse\s+/i,"");
+
+      const candidates = [match[2]];
+
+      if(/^[a-z_$][a-z_$]*$/i.test(match[4])){
+        candidates.push(match[4]);
+      }
+
+      const decoded = decodeCompactPrefix(prefix,candidates);
+
+      for(const declaration of decoded){
+        names.add(declaration.name);
+      }
+    }
+  }
+
+  return names;
+}
+
+class ProgramParser{
+  constructor(source){
+    this.source = String(source);
+    this.position = 0;
+  }
+
+  rest(){
+    return this.source.slice(this.position);
+  }
+
+  starts(text){
+    return this.rest().toLowerCase().startsWith(text.toLowerCase());
+  }
+
+  skipSpace(){
+    while(
+      this.position<this.source.length &&
+      /\s/.test(this.source[this.position])
+    ){
+      this.position++;
+    }
+  }
+
+  skipSeparators(){
+    while(this.position<this.source.length){
+      const character = this.source[this.position];
+
+      if(/\s/.test(character)||character===";"){
+        this.position++;
+      }else{
+        break;
+      }
+    }
+  }
+
+  parseCompactControlPrefix(){
+    const match = this.rest().match(
+      /^(.+?)(if|while)\s*([a-z_$][a-z_$]*)\s*(==|!=|>=|<=|=|>|<)\s*([a-z_$][a-z_$]*|[-+]?(?:\d+(?:\.\d*)?|\.\d+))\s*\{/i
+    );
+
+    if(!match) return null;
+
+    const candidates = [match[3]];
+
+    if(/^[a-z_$][a-z_$]*$/i.test(match[5])){
+      candidates.push(match[5]);
+    }
+
+    const declarations = decodeCompactPrefix(match[1],candidates);
+
+    if(!declarations.length) return null;
+
+    this.position += match[1].length;
+
+    const control = match[2].toLowerCase()==="while"
+      ? this.parseWhile()
+      : this.parseIf();
+
+    return {
+      type:"sequence",
+      body:declarations.concat([control])
+    };
+  }
+
+  readCompactDeclarationsBeforeIf(){
+    const prefixMatch = this.rest().match(
+      /^((?:[a-z_$][a-z_$]*0)+)(?=if\s*[^{}]+\{)/i
+    );
+
+    if(!prefixMatch) return [];
+
+    const following = this.rest().slice(prefixMatch[1].length);
+    const conditionMatch = following.match(
+      /^if\s*([a-z_$][a-z_$]*)\s*(==|!=|>=|<=|=|>|<)\s*([a-z_$][a-z_$]*|[-+]?(?:\d+(?:\.\d*)?|\.\d+))\s*\{/i
+    );
+
+    if(!conditionMatch) return [];
+
+    const candidates = [conditionMatch[1]];
+
+    if(/^[a-z_$][a-z_$]*$/i.test(conditionMatch[3])){
+      candidates.push(conditionMatch[3]);
+    }
+
+    const declarations = decodeCompactPrefix(prefixMatch[1],candidates);
+
+    if(!declarations.length) return [];
+
+    this.position += prefixMatch[1].length;
+    this.skipSpace();
+
+    return declarations;
+  }
+
+  parseCompactAssignmentPrefix(){
+    const match = this.rest().match(
+      /^(.+?)([a-z_$][a-z_$]*)(\+=|-=|\*=|\/=|=)([-+]?(?:\d+(?:\.\d*)?|\.\d+)|[a-z_$][a-z_$]*)/i
+    );
+
+    if(!match) return null;
+
+    const candidates = [match[2]];
+
+    if(/^[a-z_$][a-z_$]*$/i.test(match[4])){
+      candidates.push(match[4]);
+    }
+
+    const declarations = decodeCompactPrefix(match[1],candidates);
+
+    if(!declarations.length) return null;
+
+    this.position += match[1].length;
+
+    const assignment = this.parseStatement();
+
+    return {
+      type:"sequence",
+      body:declarations.concat([assignment])
+    };
+  }
+
+  readBlock(){
+    this.skipSpace();
+
+    if(this.source[this.position]!=="{"){
+      throw new Error("Vor dem Block fehlt eine geschweifte Klammer: {");
+    }
+
+    this.position++;
+    return this.parseBlock(true);
+  }
+
+  parseBlock(expectClose){
+    const nodes = [];
+
+    while(this.position<this.source.length){
+      this.skipSeparators();
+
+      if(this.position>=this.source.length) break;
+
+      if(this.source[this.position]==="}"){
+        if(!expectClose){
+          throw new Error("Unerwartete schließende Klammer: }");
+        }
+
+        this.position++;
+        return nodes;
+      }
+
+      nodes.push(this.parseStatement());
+    }
+
+    if(expectClose){
+      throw new Error("Schließende Klammer fehlt: }");
+    }
+
+    return nodes;
+  }
+
+  readControlCondition(){
+    this.skipSpace();
+
+    const braceIndex = this.source.indexOf("{",this.position);
+
+    if(braceIndex<0){
+      throw new Error("Nach der Bedingung fehlt ein Block mit { }.");
+    }
+
+    const condition = this.source.slice(this.position,braceIndex).trim();
+    this.position = braceIndex;
+
+    if(!condition){
+      throw new Error("Die Bedingung ist leer.");
+    }
+
+    return condition;
+  }
+
+  parseIf(){
+    this.position += 2;
+
+    const condition = this.readControlCondition();
+    const body = this.readBlock();
+
+    const node = {
+      type:"if",
+      condition,
+      body,
+      elseBody:null
+    };
+
+    this.skipSeparators();
+
+    if(this.starts("elseif")){
+      this.position += 6;
+
+      const nestedCondition = this.readControlCondition();
+      const nestedBody = this.readBlock();
+
+      node.elseBody = [{
+        type:"if",
+        condition:nestedCondition,
+        body:nestedBody,
+        elseBody:null
+      }];
+
+      this.attachElseChain(node.elseBody[0]);
+      return node;
+    }
+
+    if(this.starts("else")){
+      this.position += 4;
+      this.skipSpace();
+
+      const declarations = this.readCompactDeclarationsBeforeIf();
+
+      if(this.starts("if")){
+        const nested = this.parseIf();
+
+        node.elseBody = declarations.length
+          ? [{type:"sequence",body:declarations.concat([nested])}]
+          : [nested];
+      }else{
+        const elseBody = this.readBlock();
+
+        node.elseBody = declarations.length
+          ? declarations.concat(elseBody)
+          : elseBody;
+      }
+    }
+
+    return node;
+  }
+
+  attachElseChain(node){
+    this.skipSeparators();
+
+    if(this.starts("elseif")){
+      this.position += 6;
+
+      const condition = this.readControlCondition();
+      const body = this.readBlock();
+
+      node.elseBody = [{
+        type:"if",
+        condition,
+        body,
+        elseBody:null
+      }];
+
+      this.attachElseChain(node.elseBody[0]);
+      return;
+    }
+
+    if(this.starts("else")){
+      this.position += 4;
+      this.skipSpace();
+
+      const declarations = this.readCompactDeclarationsBeforeIf();
+
+      if(this.starts("if")){
+        node.elseBody = declarations.length
+          ? [{type:"sequence",body:declarations.concat([this.parseIf()])}]
+          : [this.parseIf()];
+      }else{
+        const body = this.readBlock();
+
+        node.elseBody = declarations.length
+          ? declarations.concat(body)
+          : body;
+      }
+    }
+  }
+
+  parseWhile(){
+    this.position += 5;
+
+    const condition = this.readControlCondition();
+    const body = this.readBlock();
+
+    return {type:"while",condition,body};
+  }
+
+  readSimpleCommand(){
+    const remaining = this.rest();
+    let match;
+
+    match = remaining.match(
+      /^(?:goto|move)\s*([-+]?(?:\d+(?:\.\d*)?|\.\d+)|[a-z_$][a-z_$]*)\s*,\s*([-+]?(?:\d+(?:\.\d*)?|\.\d+)|[a-z_$][a-z_$]*)/i
+    );
+
+    if(match){
+      this.position += match[0].length;
+
+      return {
+        type:"command",
+        command:"goto",
+        args:[match[1],match[2]]
+      };
+    }
+
+    match = remaining.match(
+      /^(?:pencolor|color)\s*([-+]?(?:\d+(?:\.\d*)?|\.\d+)|[a-z_$][a-z_$]*)/i
+    );
+
+    if(match){
+      this.position += match[0].length;
+
+      return {
+        type:"command",
+        command:"color",
+        args:[match[1]]
+      };
+    }
+
+    match = remaining.match(
+      /^(?:thickness|penwidth|pensize)\s*([-+]?\d+(?:\.\d*)?)/i
+    );
+
+    if(match){
+      this.position += match[0].length;
+
+      return {
+        type:"command",
+        command:"thickness",
+        args:[Number(match[1])]
+      };
+    }
+
+    match = remaining.match(/^(penoff|penon|clear|stop|cls|break)/i);
+
+    if(match){
+      this.position += match[0].length;
+
+      return {
+        type:"command",
+        command:match[1].toLowerCase(),
+        args:[]
+      };
+    }
+
+    if(/^print/i.test(remaining)){
+      this.position += 5;
+      this.skipSpace();
+
+      let value = "";
+
+      if(this.source[this.position]==='"'){
+        this.position++;
+        const end = this.source.indexOf('"',this.position);
+
+        if(end<0){
+          throw new Error("Bei print fehlt das schließende Anführungszeichen.");
+        }
+
+        value = this.source.slice(this.position,end);
+        this.position = end+1;
+      }else if(this.source[this.position]==="'"){
+        this.position++;
+        const end = this.source.indexOf("'",this.position);
+
+        if(end<0){
+          throw new Error("Bei print fehlt das schließende Anführungszeichen.");
+        }
+
+        value = this.source.slice(this.position,end);
+        this.position = end+1;
+      }else{
+        let end = this.position;
+
+        while(end<this.source.length &&
+          !/[;\n\r{}]/.test(this.source[end])){
+          end++;
+        }
+
+        value = this.source.slice(this.position,end).trim();
+        this.position = end;
+      }
+
+      return {type:"command",command:"print",args:[value]};
+    }
+
+    return null;
+  }
+
+  parseStatement(){
+    this.skipSeparators();
+
+    if(this.position>=this.source.length){
+      return {type:"empty"};
+    }
+
+    if(this.source[this.position]==="{"){
+      return {type:"block",body:this.readBlock()};
+    }
+
+    if(this.source[this.position]==="}"){
+      throw new Error("Unerwartete schließende Klammer: }");
+    }
+
+    const label = this.rest().match(/^([a-z_$][a-z_$]*):/i);
+
+    if(label){
+      this.position += label[0].length;
+      return {type:"empty"};
+    }
+
+    const compactControl = this.parseCompactControlPrefix();
+
+    if(compactControl){
+      return compactControl;
+    }
+
+    const trueLoop = this.rest().match(/^true\b/i);
+
+    if(trueLoop){
+      this.position += trueLoop[0].length;
+      this.skipSpace();
+
+      if(this.source[this.position]!=="{"){
+        throw new Error("Nach true fehlt ein Block mit { }.");
+      }
+
+      return {
+        type:"while",
+        condition:"true",
+        body:this.readBlock()
+      };
+    }
+
+    if(this.starts("if")){
+      return this.parseIf();
+    }
+
+    if(this.starts("while")){
+      return this.parseWhile();
+    }
+
+    if(this.starts("else")){
+      throw new Error("else benötigt einen vorherigen if-Block.");
+    }
+
+    const compactDeclaration = this.rest().match(
+      /^([a-z_$][a-z_$]*)0(?=(?:penoff|penon|pensize|pencolor|color|thickness|penwidth|goto|move|clear|stop|cls|break|print))/i
+    );
+
+    if(compactDeclaration){
+      this.position += compactDeclaration[0].length;
+
+      return {
+        type:"declare",
+        name:compactDeclaration[1].toLowerCase(),
+        value:0
+      };
+    }
+
+    const command = this.readSimpleCommand();
+
+    if(command){
+      return command;
+    }
+
+    let match = this.rest().match(
+      /^([a-z_$][a-z_$]*)(\+\+|--)(?=$|[\s;{}])/i
+    );
+
+    if(match){
+      this.position += match[0].length;
+
+      return {
+        type:"assign",
+        name:match[1].toLowerCase(),
+        operator:match[2]==="++"?"+=":"-=",
+        value:"1"
+      };
+    }
+
+    const compactAssignment = this.parseCompactAssignmentPrefix();
+
+    if(compactAssignment){
+      return compactAssignment;
+    }
+
+    match = this.rest().match(
+      /^([a-z_$][a-z_$]*)[ \t]+([-+]?(?:\d+(?:\.\d*)?|\.\d+))/
+    );
+
+    if(match){
+      this.position += match[0].length;
+
+      return {
+        type:"declare",
+        name:match[1].toLowerCase(),
+        value:Number(match[2])
+      };
+    }
+
+    match = this.rest().match(
+      /^([a-z_$][a-z_$]*)0(?=$|[\s;{}])/i
+    );
+
+    if(match){
+      this.position += match[0].length;
+
+      return {
+        type:"declare",
+        name:match[1].toLowerCase(),
+        value:0
+      };
+    }
+
+    match = this.rest().match(
+      /^([a-z_$][a-z_$]*)(\+=|-=|\*=|\/=|=)([-+]?(?:\d+(?:\.\d*)?|\.\d+)|[a-z_$][a-z_$]*|true|false)/i
+    );
+
+    if(match){
+      this.position += match[0].length;
+
+      return {
+        type:"assign",
+        name:match[1].toLowerCase(),
+        operator:match[2],
+        value:match[3]
+      };
+    }
+
+    const unknown = this.rest().match(/^[^\s;{}]+/);
+
+    if(unknown){
+      this.position += unknown[0].length;
+      throw new Error("Unbekannter Befehl: "+unknown[0]);
+    }
+
+    throw new Error("Der Befehl konnte nicht gelesen werden.");
+  }
+
+  parse(){
+    return this.parseBlock(false);
+  }
+}
+
+async function executeNodes(nodes){
+  for(const node of nodes){
+    if(stopped||breakRequested) return;
+
+    executionSteps++;
+
+    if(executionSteps%100===0){
+      await fastYield();
+      if(stopped||breakRequested) return;
+    }
+
+    await executeNode(node);
+  }
+}
+
+async function executeNode(node){
+  if(stopped||breakRequested||!node) return;
+
+  switch(node.type){
+    case "empty":
+      return;
+
+    case "block":
+      await executeNodes(node.body);
+      return;
+
+    case "sequence":
+      await executeNodes(node.body);
+      return;
+
+    case "declare":
+      variables[node.name] = node.value;
+      addOutput(node.name+" = "+node.value);
+      return;
+
+    case "assign":{
+      const oldValue = getVariable(node.name);
+
+      if(!node._compiledValue){
+        node._compiledValue = compileToken(node.value);
+      }
+
+      const newValue = resolveCompiledToken(node._compiledValue);
+      let result;
+
+      switch(node.operator){
+        case "=":
+          result = newValue;
+          break;
+        case "+=":
+          result = oldValue+newValue;
+          break;
+        case "-=":
+          result = oldValue-newValue;
+          break;
+        case "*=":
+          result = oldValue*newValue;
+          break;
+        case "/=":
+          if(newValue===0){
+            throw new Error("Division durch null.");
+          }
+          result = oldValue/newValue;
+          break;
+        default:
+          throw new Error("Unbekannter Zuweisungsoperator.");
+      }
+
+      setVariable(node.name,result);
+      addOutput(node.name+" = "+roundNumber(result));
+      return;
+    }
+
+    case "if":
+      if(!node._compiledCondition){
+        node._compiledCondition = compileCondition(node.condition);
+      }
+
+      if(evaluateCompiledCondition(node._compiledCondition)){
+        await executeNodes(node.body);
+      }else if(node.elseBody){
+        await executeNodes(node.elseBody);
+      }
+      return;
+
+    case "while":{
+      if(!node._compiledCondition){
+        node._compiledCondition = compileCondition(node.condition);
+      }
+
+      let iterations = 0;
+
+      while(!stopped&&evaluateCompiledCondition(node._compiledCondition)){
+        iterations++;
+        loopDepth++;
+
+        try{
+          await executeNodes(node.body);
+        }finally{
+          loopDepth--;
+        }
+
+        if(stopped) return;
+
+        if(breakRequested){
+          breakRequested = false;
+          return;
+        }
+
+        if(iterations%50===0){
+          await fastYield();
+        }
+      }
+
+      return;
+    }
+
+    case "command":
+      await executeCommand(node);
+      return;
+
+    default:
+      throw new Error("Unbekannter Programmteil.");
+  }
+}
+
+async function executeCommand(node){
+  const command = node.command;
+  const args = node.args;
+
+  switch(command){
+    case "goto":
+      if(!node._compiledArgs){
+        node._compiledArgs = [compileToken(args[0]),compileToken(args[1])];
+      }
+
+      gotoPosition(
+        resolveCompiledToken(node._compiledArgs[0]),
+        resolveCompiledToken(node._compiledArgs[1])
+      );
+      addOutput("goto "+roundNumber(px)+","+roundNumber(py));
+      return;
+
+    case "color":
+      if(!node._compiledArgs){
+        node._compiledArgs = [compileToken(args[0])];
+      }
+
+      setPenColor(resolveCompiledToken(node._compiledArgs[0]));
+      addOutput("pencolor "+penColor);
+      return;
+
+    case "thickness":
+      setPenWidth(args[0]);
+      addOutput("thickness "+penWidth);
+      return;
+
+    case "penon":
+      penIsOn = true;
+      addOutput("penon");
+      return;
+
+    case "penoff":
+      penIsOn = false;
+      addOutput("penoff");
+      return;
+
+    case "clear":
+      clearCanvas();
+      px = 0;
+      py = 0;
+      updatePosition();
+      addOutput("clear");
+      return;
+
+    case "cls":
+      outputLines = [];
+      shouldClearConsole = true;
+      return;
+
+    case "print":{
+      const value = String(args[0]??"");
+      const match = value.match(/^([a-z_$][a-z_$]*)$/i);
+
+      if(match){
+        const key = match[1].toLowerCase();
+
+        if(key==="x"||key==="y"){
+          addOutput(String(getVariable(key)));
+        }else if(Object.prototype.hasOwnProperty.call(variables,key)){
+          addOutput(String(variables[key]));
+        }else{
+          addOutput(value);
+        }
+      }else{
+        addOutput(value);
+      }
+
+      return;
+    }
+
+    case "break":
+      if(loopDepth===0){
+        throw new Error("break kann nur innerhalb einer Schleife verwendet werden.");
+      }
+      breakRequested = true;
+      return;
+
+    case "stop":
+      stopped = true;
+      addOutput("gestoppt");
+      return;
+
+    default:
+      throw new Error("Unbekannter Befehl: "+command);
+  }
+}
+
+async function runProgram(source){
+  if(running){
+    addOutput("Es läuft bereits ein Programm.");
+    return;
+  }
+
+  running = true;
+  stopped = false;
+  executionSteps = 0;
+  outputLines = [];
+  shouldClearConsole = false;
+  breakRequested = false;
+  loopDepth = 0;
+
+  try{
+    const parser = new ProgramParser(source);
+    const program = parser.parse();
+
+    await executeNodes(program);
+
+    if(shouldClearConsole){
+      writeConsole(outputLines.join("\n"));
+    }else if(stopped){
+      addOutput("Ausführung gestoppt.");
+      writeConsole(outputLines.join("\n"));
+    }else if(outputLines.length===0){
+      writeConsole("fertig");
+    }else{
+      writeConsole(outputLines.join("\n"));
+    }
+  }catch(error){
+    addOutput("Fehler: "+error.message);
+    writeConsole(outputLines.join("\n"));
+  }finally{
+    running = false;
+  }
+}
+
+function getCurrentLineInfo(){
+  const cursor = editor.selectionStart;
+  const value = editor.value;
+  const lineStart = value.lastIndexOf("\n",cursor-1)+1;
+  let lineEnd = value.indexOf("\n",cursor);
+
+  if(lineEnd<0) lineEnd = value.length;
+
+  return {
+    value,
+    cursor,
+    lineStart,
+    lineEnd,
+    line:value.slice(lineStart,lineEnd),
+    indent:(value.slice(lineStart,lineEnd).match(/^[ \t]*/) || [""])[0]
+  };
+}
+
+function insertEditorText(text,cursorPosition){
+  const start = editor.selectionStart;
+  const end = editor.selectionEnd;
+  const value = editor.value;
+
+  editor.value = value.slice(0,start)+text+value.slice(end);
+  editor.selectionStart = editor.selectionEnd =
+    cursorPosition===undefined ? start+text.length : cursorPosition;
+}
+
+function findCondition(line){
+  return /((?:else\s*)?if|while)\s*([a-z_$][a-z_$]*)\s*(==|!=|>=|<=|=|>|<)\s*([a-z_$][a-z_$]*|[-+]?(?:\d+(?:\.\d*)?|\.\d+))/i.exec(line);
+}
+
+function findIncompleteCondition(line){
+  return /((?:else\s*)?if|while)\s*([a-z_$][a-z_$]*)\s*(==|!=|>=|<=|=|>|<)\s*$/i.exec(line);
+}
+
+function addMissingConditionDeclarations(line,conditionMatch){
+  const info = getCurrentLineInfo();
+  const sourceBeforeCondition =
+    info.value.slice(0,info.lineStart+conditionMatch.index);
+  const names = getDeclaredNames(sourceBeforeCondition);
+  const missing = [];
+
+  const left = conditionMatch[2].toLowerCase();
+  const right = conditionMatch[4].toLowerCase();
+
+  if(left!=="x"&&left!=="y"&&!names.has(left)){
+    missing.push(left);
+    names.add(left);
+  }
+
+  if(/^[a-z_$][a-z_$]*$/i.test(right)&&
+     right!=="x"&&right!=="y"&&!names.has(right)){
+    missing.push(right);
+    names.add(right);
+  }
+
+  if(missing.length===0){
+    return {line,inserted:0};
+  }
+
+  const insertion = missing.map(name=>name+"0").join("");
+  const start = conditionMatch.index;
+
+  return {
+    line:line.slice(0,start)+insertion+line.slice(start),
+    inserted:insertion.length
+  };
+}
+
+function autoDeclareConditionVariable(){
+  const info = getCurrentLineInfo();
+  const beforeCursor = info.line.slice(0,info.cursor-info.lineStart);
+  const condition = findIncompleteCondition(beforeCursor);
+
+  if(!condition) return false;
+
+  const variableName = condition[2].toLowerCase();
+  if(variableName==="x"||variableName==="y") return false;
+
+  const insertionAt = condition.index;
+  const beforeKeyword =
+    info.value.slice(0,info.lineStart+insertionAt);
+  const names = getDeclaredNames(beforeKeyword);
+
+  if(names.has(variableName)) return false;
+
+  let absoluteInsertion = info.lineStart+insertionAt;
+
+  if(/^else\s*if/i.test(condition[1])){
+    const offset = condition[1].toLowerCase().lastIndexOf("if");
+    absoluteInsertion += offset;
+  }
+
+  const insertion = variableName+"0";
+  const oldCursor = editor.selectionStart;
+
+  editor.value =
+    info.value.slice(0,absoluteInsertion)+
+    insertion+
+    info.value.slice(absoluteInsertion);
+
+  editor.selectionStart = editor.selectionEnd = oldCursor+insertion.length;
+  return true;
+}
+
+function autoDeclareAssignmentVariable(){
+  const info = getCurrentLineInfo();
+  const beforeCursor = info.line.slice(0,info.cursor-info.lineStart);
+
+  if(findIncompleteCondition(beforeCursor)) return false;
+
+  const match = beforeCursor.match(
+    /^([ \t]*)([a-z_$][a-z_$]*)\s*(?:\+=|-=|\*=|\/=|=)\s*$/
+  );
+
+  if(!match) return false;
+
+  const variableName = match[2].toLowerCase();
+  if(variableName==="x"||variableName==="y") return false;
+
+  const absoluteVariableStart = info.lineStart+match[1].length;
+  const names = getDeclaredNames(
+    info.value.slice(0,absoluteVariableStart)
+  );
+
+  if(names.has(variableName)) return false;
+
+  const insertion = variableName+"0";
+
+  editor.value =
+    info.value.slice(0,absoluteVariableStart)+
+    insertion+
+    info.value.slice(absoluteVariableStart);
+
+  const oldCursor = editor.selectionStart;
+  editor.selectionStart = editor.selectionEnd = oldCursor+insertion.length;
+  return true;
+}
+
+function autoOpenTrueLoopBlock(){
+  const info = getCurrentLineInfo();
+  const match = info.line.match(/^([ \t]*)true\s*$/i);
+
+  if(!match) return false;
+
+  const indent = match[1];
+  const before = info.line;
+  const blockText = before+" {\n"+indent+"\t\n"+indent+"}";
+
+  editor.value =
+    info.value.slice(0,info.lineStart)+
+    blockText+
+    info.value.slice(info.lineEnd);
+
+  const cursor = info.lineStart+before.length+4+indent.length;
+  editor.selectionStart = editor.selectionEnd = cursor;
+  editor.focus();
+  return true;
+}
+
+function autoOpenBlockBeforeCommand(){
+  const info = getCurrentLineInfo();
+
+  const match = info.line.match(
+    /((?:else\s*)?if|while)\s*([a-z_$][a-z_$]*)\s*(==|!=|>=|<=|=|>|<)\s*([-+]?\d+(?:\.\d+)?)([gptcms])$/i
+  );
+
+  if(!match) return;
+
+  const line = info.line;
+  const commandText = match[5];
+  const conditionEnd =
+    match.index+match[0].length-commandText.length;
+
+  if(line.slice(conditionEnd).trimStart().startsWith("{")) return;
+
+  const before = line.slice(0,conditionEnd);
+  const newLine =
+    before+" {\n"+info.indent+"\t"+
+    commandText+"\n"+info.indent+"}";
+
+  editor.value =
+    info.value.slice(0,info.lineStart)+
+    newLine+
+    info.value.slice(info.lineEnd);
+
+  const cursor =
+    info.lineStart+before.length+3+info.indent.length+commandText.length;
+
+  editor.selectionStart = editor.selectionEnd = cursor;
+}
+
+function completeBlockWithTab(){
+  const info = getCurrentLineInfo();
+  let line = info.line;
+  let condition = findCondition(line);
+
+  if(condition){
+    const declarationResult =
+      addMissingConditionDeclarations(line,condition);
+
+    if(declarationResult.inserted){
+      line = declarationResult.line;
+
+      editor.value =
+        info.value.slice(0,info.lineStart)+
+        line+
+        info.value.slice(info.lineEnd);
+
+      editor.selectionStart = editor.selectionEnd =
+        info.cursor+declarationResult.inserted;
+    }
+  }
+
+  const refreshed = getCurrentLineInfo();
+  line = refreshed.line;
+  condition = findCondition(line);
+
+  if(condition){
+    const conditionEnd = condition.index+condition[0].length;
+    const afterCondition = line.slice(conditionEnd);
+
+    if(afterCondition.trimStart().startsWith("{")){
+      const existingBrace = line.indexOf("{",conditionEnd);
+
+      if(existingBrace>=0){
+        editor.selectionStart = editor.selectionEnd =
+          refreshed.lineStart+existingBrace+1;
+      }
+
+      return;
+    }
+
+    const before = line.slice(0,conditionEnd);
+    const after = afterCondition.trimStart();
+    const blockText =
+      before+" {\n"+refreshed.indent+"\t"+
+      after+"\n"+refreshed.indent+"}";
+
+    editor.value =
+      refreshed.value.slice(0,refreshed.lineStart)+
+      blockText+
+      refreshed.value.slice(refreshed.lineEnd);
+
+    const bodyStart =
+      refreshed.lineStart+before.length+3+refreshed.indent.length;
+
+    editor.selectionStart = editor.selectionEnd =
+      after.length===0 ? bodyStart : bodyStart+after.length;
+
+    editor.focus();
+    return;
+  }
+
+  if(/^\s*else\s*$/i.test(line)){
+    const blockText =
+      line+" {\n"+info.indent+"\t\n"+info.indent+"}";
+
+    editor.value =
+      info.value.slice(0,info.lineStart)+
+      blockText+
+      info.value.slice(info.lineEnd);
+
+    const cursor =
+      info.lineStart+line.length+3+info.indent.length;
+
+    editor.selectionStart = editor.selectionEnd = cursor;
+    editor.focus();
+    return;
+  }
+
+  insertEditorText("\t");
+}
+
+editor.addEventListener("input",()=>{
+  const insertedCondition = autoDeclareConditionVariable();
+
+  if(!insertedCondition){
+    autoDeclareAssignmentVariable();
+  }
+
+  if(autoOpenTrueLoopBlock()) return;
+
+  autoOpenBlockBeforeCommand();
+});
+
+editor.addEventListener("keydown",event=>{
+  if(event.key==="Tab"){
+    event.preventDefault();
+    completeBlockWithTab();
+    return;
+  }
+
+  if(event.key==="Enter"&&(event.ctrlKey||event.metaKey)){
+    event.preventDefault();
+    runProgram(editor.value);
+  }
+});
+
+runButton.addEventListener("click",()=>{
+  runProgram(editor.value);
+});
+
+stopButton.addEventListener("click",()=>{
+  stopped = true;
+});
+
+consoleButton.addEventListener("click",async()=>{
+  try{
+    await navigator.clipboard.writeText(consoleElement.textContent);
+  }catch(error){
+    const range = document.createRange();
+    range.selectNodeContents(consoleElement);
+
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+});
+
+codeButton.addEventListener("click",async()=>{
+  try{
+    await navigator.clipboard.writeText(editor.value);
+  }catch(error){
+    editor.focus();
+    editor.select();
+    document.execCommand("copy");
+    editor.setSelectionRange(editor.value.length,editor.value.length);
+  }
+});
+
+async function runConsoleCommand(){
+  const command = consoleInput.value.trim();
+
+  if(!command) return;
+
+  consoleInput.value = "";
+
+  if(/^cls$/i.test(command)){
+    writeConsole("");
+    return;
+  }
+
+  await runProgram(command);
+}
+
+enterButton.addEventListener("click",runConsoleCommand);
+
+consoleInput.addEventListener("keydown",event=>{
+  if(event.key==="Enter"){
+    event.preventDefault();
+    runConsoleCommand();
+  }
+});
+
+editor.value = "";
+clearCanvas();
+updatePosition();
+</script>
+</body>
+</html>
