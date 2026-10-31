@@ -203,6 +203,12 @@ const positionLabel = document.getElementById("pos-label");
 ctx.imageSmoothingEnabled = false;
 
 let variables = Object.create(null);
+const pressedKeys = new Set();
+
+function isKeyPressName(name){
+  return /^[a-z0-9]press$/i.test(String(name));
+}
+
 let px = 0;
 let py = 0;
 let penColor = 1;
@@ -437,6 +443,7 @@ function getVariable(name){
 
   if(key==="x") return px;
   if(key==="y") return py;
+  if(isKeyPressName(key)) return pressedKeys.has(key[0])?1:0;
 
   if(!Object.prototype.hasOwnProperty.call(variables,key)){
     throw new Error("Variable nicht deklariert: "+key);
@@ -448,8 +455,8 @@ function getVariable(name){
 function setVariable(name,value){
   const key = String(name).toLowerCase();
 
-  if(key==="x"||key==="y"){
-    throw new Error("x und y sind schreibgeschützte Positionswerte.");
+  if(key==="x"||key==="y"||isKeyPressName(key)){
+    throw new Error("Diese Werte sind schreibgeschützt.");
   }
 
   if(!Object.prototype.hasOwnProperty.call(variables,key)){
@@ -483,7 +490,7 @@ function evaluateCondition(condition){
   if(/^false$/i.test(token)) return false;
 
   const match = token.match(
-    /^([a-z_$][a-z_$]*)\s*(==|=|!=|>=|<=|>|<)\s*([a-z_$][a-z_$]*|[-+]?(?:\d+(?:\.\d*)?|\.\d+)|true|false)$/i
+    /^([a-z_$][a-z_$]*)\s*(==|=|!=|>=|<=|>|<)\s*([a-z_$][a-z_$]*|[-+]?(?:\d+(?:\.\d*)?|\.\d+)|(?:sin|cos)\s*\([^()]+\)|true|false)$/i
   );
 
   if(!match){
@@ -509,6 +516,15 @@ function evaluateCondition(condition){
 
 function compileToken(raw){
   const token = String(raw).trim();
+  const functionMatch = token.match(/^(sin|cos)\s*\(([^()]+)\)$/i);
+
+  if(functionMatch){
+    return {
+      kind:"math",
+      operator:functionMatch[1].toLowerCase(),
+      argument:compileToken(functionMatch[2])
+    };
+  }
 
   if(/^[-+]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(token)){
     return {kind:"num",data:Number(token)};
@@ -531,6 +547,10 @@ function resolveCompiledToken(compiled){
       return compiled.data;
     case "var":
       return getVariable(compiled.data);
+    case "math":{
+      const value = resolveCompiledToken(compiled.argument);
+      return compiled.operator==="sin"?Math.sin(value):Math.cos(value);
+    }
     default:
       throw new Error("Ungültiger Wert: "+compiled.data);
   }
@@ -756,7 +776,7 @@ class ProgramParser{
 
   parseCompactAssignmentPrefix(){
     const match = this.rest().match(
-      /^(.+?)([a-z_$][a-z_$]*)(\+=|-=|\*=|\/=|=)([-+]?(?:\d+(?:\.\d*)?|\.\d+)|[a-z_$][a-z_$]*)/i
+      /^(.+?)([a-z_$][a-z_$]*)(\+=|-=|\*=|\/=|=)([-+]?(?:\d+(?:\.\d*)?|\.\d+)|(?:sin|cos)\s*\([^()]+\)|[a-z_$][a-z_$]*)/i
     );
 
     if(!match) return null;
@@ -1182,7 +1202,7 @@ class ProgramParser{
     }
 
     match = this.rest().match(
-      /^([a-z_$][a-z_$]*)(\+=|-=|\*=|\/=|=)([-+]?(?:\d+(?:\.\d*)?|\.\d+)|[a-z_$][a-z_$]*|true|false)/i
+      /^([a-z_$][a-z_$]*)(\+=|-=|\*=|\/=|=)([-+]?(?:\d+(?:\.\d*)?|\.\d+)|(?:sin|cos)\s*\([^()]+\)|[a-z_$][a-z_$]*|true|false)/i
     );
 
     if(match){
@@ -1242,6 +1262,9 @@ async function executeNode(node){
       return;
 
     case "declare":
+      if(isKeyPressName(node.name)||node.name==="x"||node.name==="y"){
+        throw new Error("Diese Werte sind schreibgeschützt.");
+      }
       variables[node.name] = node.value;
       addOutput(node.name+" = "+node.value);
       return;
@@ -1513,13 +1536,13 @@ function addMissingConditionDeclarations(line,conditionMatch){
   const left = conditionMatch[2].toLowerCase();
   const right = conditionMatch[4].toLowerCase();
 
-  if(left!=="x"&&left!=="y"&&!names.has(left)){
+  if(left!=="x"&&left!=="y"&&!isKeyPressName(left)&&!names.has(left)){
     missing.push(left);
     names.add(left);
   }
 
   if(/^[a-z_$][a-z_$]*$/i.test(right)&&
-     right!=="x"&&right!=="y"&&!names.has(right)){
+     right!=="x"&&right!=="y"&&!isKeyPressName(right)&&!names.has(right)){
     missing.push(right);
     names.add(right);
   }
@@ -1545,7 +1568,7 @@ function autoDeclareConditionVariable(){
   if(!condition) return false;
 
   const variableName = condition[2].toLowerCase();
-  if(variableName==="x"||variableName==="y") return false;
+  if(variableName==="x"||variableName==="y"||isKeyPressName(variableName)) return false;
 
   const insertionAt = condition.index;
   const beforeKeyword =
@@ -1752,6 +1775,26 @@ editor.addEventListener("input",()=>{
   if(autoOpenTrueLoopBlock()) return;
 
   autoOpenBlockBeforeCommand();
+});
+
+document.addEventListener("keydown",event=>{
+  if(event.key.length===1&&/^[a-z0-9]$/i.test(event.key)){
+    pressedKeys.add(event.key.toLowerCase());
+  }
+});
+
+document.addEventListener("keyup",event=>{
+  if(event.key.length===1&&/^[a-z0-9]$/i.test(event.key)){
+    pressedKeys.delete(event.key.toLowerCase());
+  }
+});
+
+window.addEventListener("blur",()=>{
+  pressedKeys.clear();
+});
+
+document.addEventListener("visibilitychange",()=>{
+  if(document.hidden) pressedKeys.clear();
 });
 
 editor.addEventListener("keydown",event=>{
