@@ -633,7 +633,7 @@ function getDeclaredNames(source){
     }
 
     const compactCondition =
-      /(else\s*if|if|while)\s*([a-z_$][a-z_$]*)\s*(==|!=|>=|<=|=|>|<)\s*([a-z_$][a-z_$]*|[-+]?(?:\d+(?:\.\d*)?|\.\d+))/ig;
+      /(elseif|else\s*if|if|while)\s*([a-z_$][a-z_$]*)\s*(==|!=|>=|<=|=|>|<)\s*([a-z_$][a-z_$]*|[-+]?(?:\d+(?:\.\d*)?|\.\d+))/ig;
 
     while((match=compactCondition.exec(line))!==null){
       let prefix = line.slice(0,match.index);
@@ -1542,7 +1542,7 @@ function autoDeclareConditionVariable(){
 
   let absoluteInsertion = info.lineStart+insertionAt;
 
-  if(/^else\s*if/i.test(condition[1])){
+  if(/^(?:else\s*if|elseif)/i.test(condition[1])){
     const offset = condition[1].toLowerCase().lastIndexOf("if");
     absoluteInsertion += offset;
   }
@@ -1641,7 +1641,7 @@ function autoOpenBlockBeforeCommand(){
     info.value.slice(info.lineEnd);
 
   const cursor =
-    info.lineStart+before.length+3+info.indent.length+commandText.length;
+    info.lineStart+before.length+4+info.indent.length+commandText.length;
 
   editor.selectionStart = editor.selectionEnd = cursor;
 }
