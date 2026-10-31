@@ -626,10 +626,14 @@ function getDeclaredNames(source){
     }
 
     const compactEnd =
-      /(?:^|[;\s])([a-z_$][a-z_$]*)0(?=$|[;\s{}]|(?:penon|penoff|pensize|pencolor|color|thickness|penwidth|goto|move|clear|stop|cls|break|print))/ig;
+      /(?:^|[;\\s])((?:[a-z_$]+0)+)(?=$|[;\\s{}]|(?:penon|penoff|pensize|pencolor|color|thickness|penwidth|goto|move|clear|stop|cls|break|print))/ig;
 
     while((match=compactEnd.exec(line))!==null){
-      names.add(match[1].toLowerCase());
+      const declarations = match[1].match(/[a-z_$]+(?=0)/ig) || [];
+
+      for(const name of declarations){
+        names.add(name.toLowerCase());
+      }
     }
 
     const compactCondition =
@@ -1098,18 +1102,24 @@ class ProgramParser{
       throw new Error("else benötigt einen vorherigen if-Block.");
     }
 
-    const compactDeclaration = this.rest().match(
-      /^([a-z_$][a-z_$]*)0(?=(?:penoff|penon|pensize|pencolor|color|thickness|penwidth|goto|move|clear|stop|cls|break|print))/i
+    const compactDeclarations = this.rest().match(
+      /^((?:[a-z_$]+0)+)(?=$|[\\s;{}]|(?:penoff|penon|pensize|pencolor|color|thickness|penwidth|goto|move|clear|stop|cls|break|print))/i
     );
 
-    if(compactDeclaration){
-      this.position += compactDeclaration[0].length;
+    if(compactDeclarations){
+      this.position += compactDeclarations[0].length;
 
-      return {
-        type:"declare",
-        name:compactDeclaration[1].toLowerCase(),
-        value:0
-      };
+      const declarations = compactDeclarations[0]
+        .match(/[a-z_$]+(?=0)/ig)
+        .map(name=>({
+          type:"declare",
+          name:name.toLowerCase(),
+          value:0
+        }));
+
+      return declarations.length===1
+        ? declarations[0]
+        : {type:"sequence",body:declarations};
     }
 
     const command = this.readSimpleCommand();
