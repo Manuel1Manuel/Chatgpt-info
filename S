@@ -480,6 +480,9 @@ function parseValue(value){
     return getVariable(token);
   }
 
+  const compiled = compileToken(token);
+  if(compiled.kind==="math") return resolveCompiledToken(compiled);
+
   throw new Error("Ungültiger Wert: "+token);
 }
 
@@ -563,7 +566,7 @@ function compileCondition(raw){
   if(/^false$/i.test(token)) return {mode:"literal",data:false};
 
   const match = token.match(
-    /^([a-z_$][a-z_$]*)\s*(==|=|!=|>=|<=|>|<)\s*([a-z_$][a-z_$]*|[-+]?(?:\d+(?:\.\d*)?|\.\d+)|true|false)$/i
+    /^([a-z_$][a-z_$]*)\s*(==|=|!=|>=|<=|>|<)\s*([a-z_$][a-z_$]*|[-+]?(?:\d+(?:\.\d*)?|\.\d+)|(?:sin|cos)\s*\([^()]+\)|true|false)$/i
   );
 
   if(!match){
