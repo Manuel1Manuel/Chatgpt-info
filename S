@@ -835,6 +835,10 @@ class ProgramParser{
       throw new Error("Die Bedingung ist leer.");
     }
 
+    if(/^[a-z_$][a-z_$]*$/i.test(condition)){
+      return condition+"=0";
+    }
+
     return condition;
   }
 
