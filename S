@@ -626,7 +626,7 @@ function getDeclaredNames(source){
     }
 
     const compactEnd =
-      /(?:^|[;\\s])((?:[a-z_$]+0)+)(?=$|[;\\s{}]|(?:penon|penoff|pensize|pencolor|color|thickness|penwidth|goto|move|clear|stop|cls|break|print))/ig;
+      /(?:^|[;\s])((?:[a-z_$]+0)+)(?=$|[;\\s{}]|(?:penon|penoff|pensize|pencolor|color|thickness|penwidth|goto|move|clear|stop|cls|break|print))/ig;
 
     while((match=compactEnd.exec(line))!==null){
       const declarations = match[1].match(/[a-z_$]+(?=0)/ig) || [];
@@ -1103,7 +1103,7 @@ class ProgramParser{
     }
 
     const compactDeclarations = this.rest().match(
-      /^((?:[a-z_$]+0)+)(?=$|[\\s;{}]|(?:penoff|penon|pensize|pencolor|color|thickness|penwidth|goto|move|clear|stop|cls|break|print))/i
+      /^((?:[a-z_$]+0)+)(?=$|[\s;{}]|(?:penoff|penon|pensize|pencolor|color|thickness|penwidth|goto|move|clear|stop|cls|break|print))/i
     );
 
     if(compactDeclarations){
