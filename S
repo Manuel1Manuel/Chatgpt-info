@@ -1612,7 +1612,7 @@ function autoDeclareAssignmentVariable(){
   if(!match) return false;
 
   const variableName = match[2].toLowerCase();
-  if(variableName==="x"||variableName==="y") return false;
+  if(variableName==="x"||variableName==="y"||isKeyPressName(variableName)) return false;
 
   const absoluteVariableStart = info.lineStart+match[1].length;
   const names = getDeclaredNames(
