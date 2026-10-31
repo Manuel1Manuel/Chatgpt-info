@@ -1654,6 +1654,32 @@ function autoOpenTrueLoopBlock(){
   return true;
 }
 
+function autoOpenBareConditionBlock(){
+  const info = getCurrentLineInfo();
+  const match = info.line.match(
+    /^([ \\t]*)((?:else\\s*if|elseif|if|while)\\s*)([a-z0-9]press|[a-z_$][a-z_$]*\\s+)$/i
+  );
+
+  if(!match) return false;
+
+  const condition = match[3].trim();
+  if(!isKeyPressName(condition)&&!/[ \\t]$/.test(match[3])) return false;
+
+  const before = info.line;
+  const blockText =
+    before+" {\\n"+info.indent+"\\t\\n"+info.indent+"}";
+
+  editor.value =
+    info.value.slice(0,info.lineStart)+
+    blockText+
+    info.value.slice(info.lineEnd);
+
+  const cursor = info.lineStart+before.length+4+info.indent.length;
+  editor.selectionStart = editor.selectionEnd = cursor;
+  editor.focus();
+  return true;
+}
+
 function autoOpenBlockBeforeCommand(){
   const info = getCurrentLineInfo();
 
@@ -1776,6 +1802,8 @@ editor.addEventListener("input",()=>{
   }
 
   if(autoOpenTrueLoopBlock()) return;
+
+  if(autoOpenBareConditionBlock()) return;
 
   autoOpenBlockBeforeCommand();
 });
