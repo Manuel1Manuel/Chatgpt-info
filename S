@@ -52,6 +52,7 @@ body{
   overflow:auto;
 }
 #editor:focus{border-color:var(--accent)}
+#editor::selection{background:#d52d3b;color:#fff}
 #buttons{
   display:flex;
   flex-wrap:wrap;
@@ -150,6 +151,13 @@ button:active{filter:brightness(.9)}
   overflow-wrap:anywhere;
   font:12px/1.45 Consolas,"Courier New",monospace;
 }
+.console-error{
+  color:#ff6262;
+  cursor:pointer;
+  text-decoration:underline;
+  text-decoration-color:rgba(255,98,98,.55);
+}
+.console-error:focus{outline:1px solid #ff6262;outline-offset:2px}
 #console-row{
   display:flex;
   flex:0 0 38px;
@@ -235,7 +243,7 @@ button:active{filter:brightness(.9)}
       <button id="stop">Stopp</button>
       <button id="copy-console">Konsole kopieren</button>
       <button id="copy-code">Code kopieren</button>
-      <span id="build-tools"><span id="build-version">16</span><button id="virtual-key-toggle" type="button" aria-label="Tastatur ein- oder ausblenden">T</button></span>
+      <span id="build-tools"><span id="build-version">17</span><button id="virtual-key-toggle" type="button" aria-label="Tastatur ein- oder ausblenden">T</button></span>
     </div>
 
     <div id="virtual-keyboard" hidden>
@@ -334,8 +342,38 @@ const fastYield = (() => {
 })();
 
 function writeConsole(text){
-  consoleElement.textContent = String(text);
+  const lines=String(text).split("\n");
+  consoleElement.replaceChildren();
+  lines.forEach((line,index)=>{
+    const match=line.match(/Fehler:.*?Zeile\s+(\d+)/i);
+    if(match){
+      const item=document.createElement("span");
+      item.className="console-error";
+      item.tabIndex=0;
+      item.textContent=line;
+      item.addEventListener("click",()=>jumpToLine(Number(match[1])));
+      item.addEventListener("keydown",event=>{
+        if(event.key==="Enter"||event.key===" "){event.preventDefault();jumpToLine(Number(match[1]));}
+      });
+      consoleElement.appendChild(item);
+    }else{
+      consoleElement.appendChild(document.createTextNode(line));
+    }
+    if(index<lines.length-1) consoleElement.appendChild(document.createTextNode("\n"));
+  });
   consoleElement.scrollTop = consoleElement.scrollHeight;
+}
+
+function jumpToLine(line){
+  const lines=editor.value.split("\n");
+  const target=Math.max(1,Math.min(lines.length,Number(line)||1));
+  let start=0;
+  for(let i=1;i<target;i++) start+=lines[i-1].length+1;
+  const end=start+(lines[target-1]||"").length;
+  editor.focus();
+  editor.setSelectionRange(start,end);
+  const lineHeight=parseFloat(getComputedStyle(editor).lineHeight)||22;
+  editor.scrollTop=Math.max(0,(target-1)*lineHeight);
 }
 
 function addOutput(text){
@@ -731,6 +769,7 @@ function evaluateBooleanExpression(source){
 function executeFunctionStatements(nodes){
   for(const node of nodes){
     if(!node) continue;
+    try{
     if(node.type==="sequence"||node.type==="block"){
       const nested=executeFunctionStatements(node.body);
       if(nested.returned) return nested;
@@ -766,6 +805,10 @@ function executeFunctionStatements(nodes){
       continue;
     }
     throw new Error("Dieser Befehl wird innerhalb einer Funktion nicht unterstützt.");
+    }catch(error){
+      if(!error.blocklangLine&&node.sourceLine){error.message="Zeile "+node.sourceLine+": "+error.message;error.blocklangLine=true;}
+      throw error;
+    }
   }
   return {returned:false,value:undefined};
 }
@@ -1553,7 +1596,7 @@ class ProgramParser{
       };
     }
 
-    match = this.rest().match(/^([a-z_$][a-z_$]*)(\+=|-=|\*=|\/=|=)/i);
+    match = this.rest().match(/^([a-z_$][a-z_$]*)[ \t]*(\+=|-=|\*=|\/=|=)/i);
     if(match){
       this.position+=match[0].length;
       const value=this.readExpressionUntilBoundary();
@@ -1905,6 +1948,8 @@ async function runProgram(source){
   }catch(error){
     addOutput("Fehler: "+error.message);
     writeConsole(outputLines.join("\n"));
+    const lineMatch=String(error.message).match(/Zeile\s+(\d+)/i);
+    if(lineMatch) jumpToLine(Number(lineMatch[1]));
   }finally{
     running = false;
   }
