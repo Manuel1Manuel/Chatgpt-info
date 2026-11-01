@@ -1666,7 +1666,7 @@ function findEnclosingLoop(source,position){
   return null;
 }
 
-function autoDeclareLoopVariables(){
+function autoDeclareLoopVariables(force=false){
   const info = getCurrentLineInfo();
   const beforeCursor = info.line.slice(0,info.cursor-info.lineStart);
   const afterCursor = info.value.slice(info.cursor);
@@ -1675,7 +1675,9 @@ function autoDeclareLoopVariables(){
   if(!loop) return false;
 
   const statement = beforeCursor.trimStart();
+  const completedStatement = statement.trimEnd();
   const boundary = afterCursor[0];
+  const tokenFinished = force||statement.length>completedStatement.length||/[;,]/.test(statement)||/[ \t;]/.test(boundary||"");
   const names = [];
   let match = statement.match(
     /^([a-z_$][a-z_$]*)(\+\+|--|\+=|-=|\*=|\/=|=)([-+]?(?:\d+(?:\.\d*)?|\.\d+))?$/i
@@ -1688,7 +1690,7 @@ function autoDeclareLoopVariables(){
       /^(?:goto|move)\s*([a-z_$][a-z_$]*)(?=,|[ \t;])/i
     );
 
-    if(match&&/[, \t;]/.test(boundary||"")){
+    if(match){
       names.push(match[1]);
     }
 
@@ -1699,11 +1701,11 @@ function autoDeclareLoopVariables(){
     if(match) names.push(match[1]);
   }
 
-  const assignmentRight = statement.match(
+  const assignmentRight = completedStatement.match(
     /^[a-z_$][a-z_$]*\s*(?:\+=|-=|\*=|\/=|=)\s*([a-z_$][a-z_$]*)$/i
   );
 
-  if(assignmentRight&&/[ \t;,{}]/.test(boundary||"")){
+  if(assignmentRight&&tokenFinished){
     names.push(assignmentRight[1]);
   }
 
@@ -1965,7 +1967,7 @@ document.addEventListener("visibilitychange",()=>{
 editor.addEventListener("keydown",event=>{
   if(event.key==="Tab"){
     event.preventDefault();
-    if(!autoDeclareLoopVariables()){
+    if(!autoDeclareLoopVariables(true)){
       completeBlockWithTab();
     }
     return;
