@@ -235,7 +235,7 @@ button:active{filter:brightness(.9)}
       <button id="stop">Stopp</button>
       <button id="copy-console">Konsole kopieren</button>
       <button id="copy-code">Code kopieren</button>
-      <span id="build-tools"><span id="build-version">10</span><button id="virtual-key-toggle" type="button" aria-label="Tastatur ein- oder ausblenden">T</button></span>
+      <span id="build-tools"><span id="build-version">11</span><button id="virtual-key-toggle" type="button" aria-label="Tastatur ein- oder ausblenden">T</button></span>
     </div>
 
     <div id="virtual-keyboard" hidden>
@@ -486,34 +486,36 @@ function setPenWidth(number){
 
 function getVariable(name){
   const key=String(name).toLowerCase();
-  if(key==="x") return px;
-  if(key==="y") return py;
-  if(isKeyPressName(key)) return pressedKeys.has(key.slice(0,-5))?1:0;
   for(let i=functionScopes.length-1;i>=0;i--){
     if(Object.prototype.hasOwnProperty.call(functionScopes[i],key)) return functionScopes[i][key];
   }
+  if(key==="x") return px;
+  if(key==="y") return py;
+  if(isKeyPressName(key)) return pressedKeys.has(key.slice(0,-5))?1:0;
   if(!Object.prototype.hasOwnProperty.call(variables,key)) throw new Error("Variable nicht deklariert: "+key);
   return variables[key];
 }
 
 function setVariable(name,value){
   const key=String(name).toLowerCase();
-  if(key==="x"||key==="y"||isKeyPressName(key)) throw new Error("Diese Werte sind schreibgeschützt.");
   for(let i=functionScopes.length-1;i>=0;i--){
     if(Object.prototype.hasOwnProperty.call(functionScopes[i],key)){
       functionScopes[i][key]=value;
       return;
     }
   }
+  if(key==="x"||key==="y"||isKeyPressName(key)) throw new Error("Diese Werte sind schreibgeschützt.");
   if(!Object.prototype.hasOwnProperty.call(variables,key)) throw new Error("Variable nicht deklariert: "+key);
   variables[key]=value;
 }
 
 function defineVariable(name,value){
   const key=String(name).toLowerCase();
-  if(key==="x"||key==="y"||isKeyPressName(key)) throw new Error("Diese Werte sind schreibgeschützt.");
   if(functionScopes.length) functionScopes[functionScopes.length-1][key]=value;
-  else variables[key]=value;
+  else{
+    if(key==="x"||key==="y"||isKeyPressName(key)) throw new Error("Diese Werte sind schreibgeschützt.");
+    variables[key]=value;
+  }
 }
 
 function getArrayElement(name,index){
@@ -607,7 +609,16 @@ function evaluateMathExpression(source){
       const args=[];
       if(tokens[index]!==")"){
         while(true){
-          args.push(addition());
+          const possibleName=tokens[index];
+          const isArrayArgument=/^[a-z_$][a-z0-9_$]*$/i.test(possibleName||"")&&
+            (tokens[index+1]===","||tokens[index+1]===")")&&
+            Array.isArray(getVariable(possibleName));
+          if(isArrayArgument){
+            args.push(getVariable(possibleName));
+            index++;
+          }else{
+            args.push(addition());
+          }
           if(tokens[index]===","){index++;continue;}
           break;
         }
@@ -1227,6 +1238,40 @@ class ProgramParser{
     const remaining = this.rest();
     let match;
 
+    match = remaining.match(/^(?:goto|move)\s*/i);
+    if(match){
+      const start=this.position+match[0].length;
+      let comma=-1,depth=0;
+      for(let i=start;i<this.source.length;i++){
+        const character=this.source[i];
+        if(character==="(") depth++;
+        if(character===")"){
+          depth--;
+          if(depth<0) throw new Error("Unerwartete schließende Klammer.");
+        }
+        if(character===","&&depth===0){comma=i;break;}
+        if(/[;\n\r{}]/.test(character)&&depth===0) break;
+      }
+      if(comma<0) throw new Error("goto benötigt zwei Zahlenwerte, getrennt durch ein Komma.");
+      let end=comma+1;
+      depth=0;
+      while(end<this.source.length){
+        const character=this.source[end];
+        if(character==="(") depth++;
+        if(character===")"){
+          depth--;
+          if(depth<0) throw new Error("Unerwartete schließende Klammer.");
+        }
+        if(/[;\n\r{}]/.test(character)&&depth===0) break;
+        end++;
+      }
+      const first=this.source.slice(start,comma).trim();
+      const second=this.source.slice(comma+1,end).trim();
+      if(!first||!second) throw new Error("goto benötigt zwei Zahlenwerte.");
+      this.position=end;
+      return {type:"command",command:"goto",args:[first,second]};
+    }
+
     match = remaining.match(/^(?:pencolor|color)\s*/i);
     if(match){
       this.position+=match[0].length;
@@ -1777,6 +1822,15 @@ async function executeCommand(node){
   }
 }
 
+function registerFunctionDefinitions(nodes){
+  for(const node of nodes){
+    if(!node) continue;
+    if(node.type==="functionDef") functionDefinitions[node.name]=node;
+    if(node.body) registerFunctionDefinitions(node.body);
+    if(node.elseBody) registerFunctionDefinitions(node.elseBody);
+  }
+}
+
 async function runProgram(source){
   if(running){
     addOutput("Es läuft bereits ein Programm.");
@@ -1798,7 +1852,7 @@ async function runProgram(source){
   try{
     const parser = new ProgramParser(source);
     const program = parser.parse();
-
+    registerFunctionDefinitions(program);
     await executeNodes(program);
 
     if(shouldClearConsole){
