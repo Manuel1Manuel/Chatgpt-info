@@ -858,6 +858,10 @@ class ProgramParser{
       throw new Error("Die Bedingung ist leer.");
     }
 
+    if(isKeyPressName(condition)){
+      return condition+"=1";
+    }
+
     if(/^[a-z_$][a-z_$]*$/i.test(condition)){
       return condition+"=0";
     }
