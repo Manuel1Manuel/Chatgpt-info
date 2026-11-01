@@ -1642,9 +1642,9 @@ function findEnclosingLoop(source,position){
 
     if(character==="{"){
       const header = source.slice(segmentStart,i).trim();
-      const isLoop = /^(?:true|while\\s+.+)$/i.test(header);
-      const lineStart = source.lastIndexOf("\\n",i-1)+1;
-      const indent = (source.slice(lineStart,i).match(/^[ \\t]*/) || [""])[0];
+      const isLoop = /^(?:true|while\s+.+)$/i.test(header);
+      const lineStart = source.lastIndexOf("\n",i-1)+1;
+      const indent = (source.slice(lineStart,i).match(/^[ \t]*/) || [""])[0];
 
       stack.push({
         isLoop,
@@ -1675,7 +1675,7 @@ function autoDeclareLoopVariables(){
 
   const statement = beforeCursor.trim();
   const match = statement.match(
-    /^([a-z_$][a-z_$]*)(\\+\\+|--|\\+=|-=|\\*=|\\/=|=)([a-z_$][a-z_$]*|[-+]?(?:\\d+(?:\\.\\d*)?|\\.\\d+))?$/i
+    /^([a-z_$][a-z_$]*)(\+\+|--|\+=|-=|\*=|\/=|=)([a-z_$][a-z_$]*|[-+]?(?:\d+(?:\.\d*)?|\.\d+))?$/i
   );
 
   if(!match) return false;
@@ -1693,10 +1693,10 @@ function autoDeclareLoopVariables(){
   if(!missing.length) return false;
 
   const declaration = missing.map(name=>name+"0").join("");
-  const newline = info.value.indexOf("\\n",loop.openIndex);
+  const newline = info.value.indexOf("\n",loop.openIndex);
 
   if(newline<0){
-    const insertion = "\\n"+loop.indent+"\\t"+declaration+"\\n"+loop.indent+"\\t";
+    const insertion = "\n"+loop.indent+"\t"+declaration+"\n"+loop.indent+"\t";
     editor.value =
       info.value.slice(0,loop.openIndex+1)+
       insertion+
@@ -1707,7 +1707,7 @@ function autoDeclareLoopVariables(){
   }
 
   const insertionPoint = newline+1;
-  const insertion = loop.indent+"\\t"+declaration+"\\n";
+  const insertion = loop.indent+"\t"+declaration+"\n";
 
   editor.value =
     info.value.slice(0,insertionPoint)+
