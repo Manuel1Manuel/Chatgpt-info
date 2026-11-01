@@ -70,6 +70,15 @@ button:hover{filter:brightness(1.15)}
 button:active{filter:brightness(.9)}
 #run{background:var(--accent)}
 #stop{background:#a73737}
+#build-version{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  min-width:25px;
+  padding:0 5px;
+  color:#aeb3bf;
+  font:12px Consolas,"Courier New",monospace;
+}
 #console{
   flex:0 0 120px;
   min-height:55px;
@@ -169,6 +178,7 @@ button:active{filter:brightness(.9)}
       <button id="stop">Stopp</button>
       <button id="copy-console">Konsole kopieren</button>
       <button id="copy-code">Code kopieren</button>
+      <span id="build-version">01</span>
     </div>
 
     <pre id="console">bereit</pre>
