@@ -79,6 +79,46 @@ button:active{filter:brightness(.9)}
   color:#aeb3bf;
   font:12px Consolas,"Courier New",monospace;
 }
+#virtual-keyboard{
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+  padding:9px;
+  border:1px solid var(--border);
+  border-radius:7px;
+  background:#252830;
+  touch-action:none;
+  user-select:none;
+  -webkit-user-select:none;
+}
+#virtual-keyboard[hidden]{display:none}
+.key-row{
+  display:flex;
+  justify-content:center;
+  gap:5px;
+}
+.key-row button{
+  flex:1;
+  min-width:0;
+  min-height:39px;
+  padding:7px 2px;
+  border:1px solid #555a66;
+  border-radius:5px;
+  background:#414652;
+  color:#fff;
+  font-size:14px;
+  font-weight:600;
+  touch-action:none;
+  user-select:none;
+  -webkit-user-select:none;
+}
+.key-row button:active,
+.key-row button.key-active{
+  background:var(--accent);
+  border-color:#a895ff;
+}
+.key-row-middle{padding:0 4%}
+.key-row-bottom{padding:0 12%}
 #console{
   flex:0 0 120px;
   min-height:55px;
@@ -178,7 +218,23 @@ button:active{filter:brightness(.9)}
       <button id="stop">Stopp</button>
       <button id="copy-console">Konsole kopieren</button>
       <button id="copy-code">Code kopieren</button>
-      <span id="build-version">02</span>
+      <span id="build-version">03</span>
+      <button id="virtual-key-toggle" type="button">Show Tastatur</button>
+    </div>
+
+    <div id="virtual-keyboard" hidden>
+      <div class="key-row">
+        <button type="button" data-key="1">1</button><button type="button" data-key="2">2</button><button type="button" data-key="3">3</button><button type="button" data-key="4">4</button><button type="button" data-key="5">5</button><button type="button" data-key="6">6</button><button type="button" data-key="7">7</button><button type="button" data-key="8">8</button><button type="button" data-key="9">9</button><button type="button" data-key="0">0</button>
+      </div>
+      <div class="key-row">
+        <button type="button" data-key="q">Q</button><button type="button" data-key="w">W</button><button type="button" data-key="e">E</button><button type="button" data-key="r">R</button><button type="button" data-key="t">T</button><button type="button" data-key="y">Y</button><button type="button" data-key="u">U</button><button type="button" data-key="i">I</button><button type="button" data-key="o">O</button><button type="button" data-key="p">P</button>
+      </div>
+      <div class="key-row key-row-middle">
+        <button type="button" data-key="a">A</button><button type="button" data-key="s">S</button><button type="button" data-key="d">D</button><button type="button" data-key="f">F</button><button type="button" data-key="g">G</button><button type="button" data-key="h">H</button><button type="button" data-key="j">J</button><button type="button" data-key="k">K</button><button type="button" data-key="l">L</button>
+      </div>
+      <div class="key-row key-row-bottom">
+        <button type="button" data-key="z">Z</button><button type="button" data-key="x">X</button><button type="button" data-key="c">C</button><button type="button" data-key="v">V</button><button type="button" data-key="b">B</button><button type="button" data-key="n">N</button><button type="button" data-key="m">M</button>
+      </div>
     </div>
 
     <pre id="console">bereit</pre>
@@ -203,6 +259,8 @@ const runButton = document.getElementById("run");
 const stopButton = document.getElementById("stop");
 const consoleButton = document.getElementById("copy-console");
 const codeButton = document.getElementById("copy-code");
+const virtualKeyToggle = document.getElementById("virtual-key-toggle");
+const virtualKeyboard = document.getElementById("virtual-keyboard");
 const consoleElement = document.getElementById("console");
 const consoleInput = document.getElementById("console-input");
 const enterButton = document.getElementById("enter");
@@ -1978,6 +2036,41 @@ window.addEventListener("blur",()=>{
 
 document.addEventListener("visibilitychange",()=>{
   if(document.hidden) pressedKeys.clear();
+});
+
+virtualKeyToggle.addEventListener("click",()=>{
+  virtualKeyboard.hidden = !virtualKeyboard.hidden;
+  virtualKeyToggle.textContent = virtualKeyboard.hidden?"Show Tastatur":"Tastatur ausblenden";
+  if(virtualKeyboard.hidden){
+    virtualKeyboard.querySelectorAll("[data-key]").forEach(key=>{
+      pressedKeys.delete(key.dataset.key);
+      key.classList.remove("key-active");
+    });
+  }
+});
+
+virtualKeyboard.querySelectorAll("[data-key]").forEach(key=>{
+  const press = event=>{
+    event.preventDefault();
+    const value = key.dataset.key;
+    pressedKeys.add(value);
+    key.classList.add("key-active");
+    if(key.setPointerCapture&&event.pointerId!==undefined){
+      key.setPointerCapture(event.pointerId);
+    }
+  };
+
+  const release = event=>{
+    if(event) event.preventDefault();
+    pressedKeys.delete(key.dataset.key);
+    key.classList.remove("key-active");
+  };
+
+  key.addEventListener("pointerdown",press);
+  key.addEventListener("pointerup",release);
+  key.addEventListener("pointercancel",release);
+  key.addEventListener("lostpointercapture",release);
+  key.addEventListener("contextmenu",event=>event.preventDefault());
 });
 
 editor.addEventListener("keydown",event=>{
