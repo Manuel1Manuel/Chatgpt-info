@@ -70,7 +70,15 @@ button:hover{filter:brightness(1.15)}
 button:active{filter:brightness(.9)}
 #run{background:var(--accent)}
 #stop{background:#a73737}
+#build-tools{
+  display:inline-flex;
+  flex:0 0 auto;
+  align-items:center;
+  gap:2px;
+  white-space:nowrap;
+}
 #virtual-key-toggle{
+  flex:0 0 27px;
   min-width:27px;
   width:27px;
   height:27px;
@@ -227,8 +235,7 @@ button:active{filter:brightness(.9)}
       <button id="stop">Stopp</button>
       <button id="copy-console">Konsole kopieren</button>
       <button id="copy-code">Code kopieren</button>
-      <span id="build-version">05</span>
-      <button id="virtual-key-toggle" type="button" aria-label="Tastatur ein- oder ausblenden">T</button>
+      <span id="build-tools"><span id="build-version">06</span><button id="virtual-key-toggle" type="button" aria-label="Tastatur ein- oder ausblenden">T</button></span>
     </div>
 
     <div id="virtual-keyboard" hidden>
@@ -1232,7 +1239,7 @@ class ProgramParser{
     }
 
     const compactDeclarations = this.rest().match(
-      /^((?:[a-z_$]+0)+)(?=$|[\s;{}]|(?:penoff|penon|pensize|pencolor|color|thickness|penwidth|goto|move|wait|clear|stop|cls|break|print))/i
+      /^((?:[a-z_$]+0)+)(?=$|[\s;{}]|(?:penoff|penon|pensize|pencolor|color|thickness|penwidth|goto|move|wait|clear|stop|cls|break|print|true))/i
     );
 
     if(compactDeclarations){
@@ -1719,6 +1726,125 @@ function autoDeclareConditionVariable(){
   return true;
 }
 
+function getEnclosingLoops(source,position){
+  const stack = [];
+  let segmentStart = 0;
+
+  for(let i=0;i<position;i++){
+    const character = source[i];
+
+    if(character==="{"){
+      const header = source.slice(segmentStart,i).trim();
+
+      if(/^(?:true|while\\s*.+)$/i.test(header)){
+        stack.push({openIndex:i});
+      }else{
+        stack.push(null);
+      }
+
+      segmentStart = i+1;
+    }else if(character==="}"){
+      stack.pop();
+      segmentStart = i+1;
+    }
+  }
+
+  return stack.filter(Boolean);
+}
+
+function getLoopDeclarationLine(source,loop){
+  const start = loop.openIndex+1;
+  let end = source.indexOf("\\n",start);
+  if(end<0) end=source.length;
+
+  const line = source.slice(start,end);
+  const match = line.match(/^([ \\t]*)((?:[a-z_$]+0)+)(?=\\s*(?:$|;))/i);
+
+  if(!match) return null;
+
+  return {
+    start:start+match[1].length,
+    end:start+match[1].length+match[2].length,
+    indent:match[1],
+    text:match[2],
+    names:(match[2].match(/[a-z_$]+(?=0)/ig)||[]).map(name=>name.toLowerCase())
+  };
+}
+
+function moveLoopVariableDeclaration(direction){
+  const info = getCurrentLineInfo();
+  const match = info.line.match(/^\\s*([a-z_$][a-z_$]*)\\s*(?:\\+\\+|--|\\+=|-=|\\*=|\\/=|=)/i);
+
+  if(!match) return false;
+
+  const name = match[1].toLowerCase();
+  if(name==="x"||name==="y"||isKeyPressName(name)) return false;
+
+  const loops = getEnclosingLoops(info.value,info.lineStart);
+  if(!loops.length) return false;
+
+  const currentLoop = loops[loops.length-1];
+  const parentLoop = loops.length>1?loops[loops.length-2]:null;
+  const currentDeclaration = getLoopDeclarationLine(info.value,currentLoop);
+  const parentDeclaration = parentLoop?getLoopDeclarationLine(info.value,parentLoop):null;
+
+  let source = info.value;
+  let from = null;
+  let toLoop = null;
+
+  if(direction==="up"){
+    if(!parentLoop||!currentDeclaration||!currentDeclaration.names.includes(name)) return false;
+    from=currentDeclaration;
+    toLoop=parentLoop;
+  }else{
+    if(!parentLoop||!parentDeclaration||!parentDeclaration.names.includes(name)) return false;
+    from=parentDeclaration;
+    toLoop=currentLoop;
+  }
+
+  const targetDeclaration = getLoopDeclarationLine(source,toLoop);
+  const targetHasName = targetDeclaration&&targetDeclaration.names.includes(name);
+
+  if(targetHasName) return false;
+
+  const remaining = from.names.filter(item=>item!==name);
+  const replacement = remaining.length
+    ? from.indent+remaining.map(item=>item+"0").join("")
+    : "";
+
+  source=source.slice(0,from.start-from.indent.length)+replacement+source.slice(from.end);
+
+  const refreshedLoops=getEnclosingLoops(source,info.lineStart);
+  const refreshedTarget=direction==="up"
+    ? refreshedLoops[refreshedLoops.length-2]
+    : refreshedLoops[refreshedLoops.length-1];
+
+  if(!refreshedTarget) return false;
+
+  const target=getLoopDeclarationLine(source,refreshedTarget);
+  if(target){
+    const names=target.names.concat([name]);
+    const updated=target.indent+names.map(item=>item+"0").join("");
+    source=source.slice(0,target.start-target.indent.length)+updated+source.slice(target.end);
+  }else{
+    const insertAt=refreshedTarget.openIndex+1;
+    const lineEnd=source.indexOf("\\n",insertAt);
+    const indentMatch=source.slice(insertAt,lineEnd<0?source.length:lineEnd).match(/^([ \\t]*)/);
+    const indent=indentMatch?indentMatch[1]:"\\t";
+    const declaration=indent+name+"0";
+    if(lineEnd<0){
+      source=source.slice(0,insertAt)+"\\n"+declaration+"\\n"+source.slice(insertAt);
+    }else{
+      source=source.slice(0,lineEnd+1)+declaration+"\\n"+source.slice(lineEnd+1);
+    }
+  }
+
+  const oldCursor=editor.selectionStart;
+  editor.value=source;
+  editor.selectionStart=editor.selectionEnd=oldCursor;
+  return true;
+}
+
 function findEnclosingLoop(source,position){
   const stack = [];
   let segmentStart = 0;
@@ -2095,6 +2221,16 @@ virtualKeyboard.querySelectorAll("[data-key]").forEach(key=>{
 });
 
 editor.addEventListener("keydown",event=>{
+  if(event.key==="ArrowUp"&&moveLoopVariableDeclaration("up")){
+    event.preventDefault();
+    return;
+  }
+
+  if(event.key==="ArrowDown"&&moveLoopVariableDeclaration("down")){
+    event.preventDefault();
+    return;
+  }
+
   if(event.key==="Tab"){
     event.preventDefault();
     if(!autoDeclareLoopVariables(true)){
