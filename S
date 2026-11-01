@@ -235,7 +235,7 @@ button:active{filter:brightness(.9)}
       <button id="stop">Stopp</button>
       <button id="copy-console">Konsole kopieren</button>
       <button id="copy-code">Code kopieren</button>
-      <span id="build-tools"><span id="build-version">14</span><button id="virtual-key-toggle" type="button" aria-label="Tastatur ein- oder ausblenden">T</button></span>
+      <span id="build-tools"><span id="build-version">15</span><button id="virtual-key-toggle" type="button" aria-label="Tastatur ein- oder ausblenden">T</button></span>
     </div>
 
     <div id="virtual-keyboard" hidden>
@@ -433,12 +433,11 @@ function drawPixelLine(x1,y1,x2,y2,width,color){
   ctx.strokeStyle=color;
   ctx.fillStyle=color;
   ctx.lineWidth=w;
-  ctx.lineCap="round";
-  ctx.lineJoin="round";
+  ctx.lineCap="butt";
+  ctx.lineJoin="miter";
   if(a.x===b.x&&a.y===b.y){
     ctx.beginPath();
-    ctx.arc(a.x,a.y,w/2,0,Math.PI*2);
-    ctx.fill();
+    ctx.fillRect(a.x-w/2,a.y-w/2,w,w);
   }else{
     ctx.beginPath();
     ctx.moveTo(a.x,a.y);
