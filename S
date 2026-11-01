@@ -1687,7 +1687,7 @@ function autoDeclareLoopVariables(force=false){
     names.push(match[1]);
   }else{
     match = statement.match(
-      /^(?:goto|move)\s*([a-z_$][a-z_$]*)(?=,|[ \t;])/i
+      /^(?:goto|move)\s*([a-z_$][a-z_$]*)(?=,|[ \t;]|$)/i
     );
 
     if(match){
