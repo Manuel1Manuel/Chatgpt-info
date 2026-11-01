@@ -178,7 +178,7 @@ button:active{filter:brightness(.9)}
       <button id="stop">Stopp</button>
       <button id="copy-console">Konsole kopieren</button>
       <button id="copy-code">Code kopieren</button>
-      <span id="build-version">01</span>
+      <span id="build-version">02</span>
     </div>
 
     <pre id="console">bereit</pre>
@@ -1109,7 +1109,7 @@ class ProgramParser{
     }
 
     const waitCommand = this.rest().match(
-      /^wait[ \\t]*([-+]?(?:\\d+(?:\\.\\d*)?|\\.\\d+))(?=$|[\\s;{}])/i
+      /^wait[ \t]*([-+]?(?:\d+(?:\.\d*)?|\.\d+))(?=$|[\s;{}])/i
     );
 
     if(waitCommand){
@@ -1122,7 +1122,7 @@ class ProgramParser{
       };
     }
 
-    if(/^wait(?:$|[ \\t])/i.test(this.rest())){
+    if(/^wait(?:$|[ \t])/i.test(this.rest())){
       throw new Error("wait benötigt eine Millisekunden-Zahl, zum Beispiel wait 1000.");
     }
 
