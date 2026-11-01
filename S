@@ -35,24 +35,66 @@ body{
   flex-direction:column;
   gap:9px;
 }
-#editor{
+#editor-wrap{
+  position:relative;
   flex:1;
   min-height:100px;
+  min-width:0;
   width:100%;
-  resize:none;
+  overflow:hidden;
   border:1px solid var(--border);
   border-radius:6px;
+  background:#101115;
+}
+#editor-wrap:focus-within{border-color:var(--accent)}
+#editor-highlight{
+  position:absolute;
+  inset:0;
+  z-index:1;
+  width:100%;
+  height:100%;
+  margin:0;
   padding:12px;
+  border:0;
   background:#101115;
   color:#f4f4f4;
+  font:14px/1.55 Consolas,"Courier New",monospace;
+  tab-size:4;
+  white-space:pre;
+  overflow:hidden;
+  pointer-events:none;
+}
+#editor-highlight div{
+  display:block;
+  min-height:1.55em;
+  line-height:1.55;
+}
+#editor-highlight .editor-error-line{
+  background:rgba(213,45,59,.42);
+  color:#fff;
+}
+#editor{
+  position:absolute;
+  inset:0;
+  z-index:2;
+  display:block;
+  width:100%;
+  height:100%;
+  min-height:0;
+  resize:none;
+  border:0;
+  border-radius:6px;
+  padding:12px;
+  background:transparent;
+  color:transparent;
+  caret-color:#f4f4f4;
   outline:none;
   font:14px/1.55 Consolas,"Courier New",monospace;
   tab-size:4;
   white-space:pre;
   overflow:auto;
 }
-#editor:focus{border-color:var(--accent)}
-#editor::selection{background:#d52d3b;color:#fff}
+#editor::selection{background:rgba(116,86,232,.3);color:transparent}
 #buttons{
   display:flex;
   flex-wrap:wrap;
@@ -236,14 +278,17 @@ button:active{filter:brightness(.9)}
 <body>
 <div id="app">
   <section id="left">
-    <textarea id="editor" spellcheck="false" autocapitalize="off" autocomplete="off"></textarea>
+    <div id="editor-wrap">
+      <pre id="editor-highlight" aria-hidden="true"></pre>
+      <textarea id="editor" spellcheck="false" autocapitalize="off" autocomplete="off"></textarea>
+    </div>
 
     <div id="buttons">
       <button id="run">Ausführen</button>
       <button id="stop">Stopp</button>
       <button id="copy-console">Konsole kopieren</button>
       <button id="copy-code">Code kopieren</button>
-      <span id="build-tools"><span id="build-version">17</span><button id="virtual-key-toggle" type="button" aria-label="Tastatur ein- oder ausblenden">T</button></span>
+      <span id="build-tools"><span id="build-version">18</span><button id="virtual-key-toggle" type="button" aria-label="Tastatur ein- oder ausblenden">T</button></span>
     </div>
 
     <div id="virtual-keyboard" hidden>
@@ -282,6 +327,9 @@ button:active{filter:brightness(.9)}
 
 <script>
 const editor = document.getElementById("editor");
+const editorHighlight = document.getElementById("editor-highlight");
+let editorErrorLine = null;
+let lastEditorValue = editor.value;
 const runButton = document.getElementById("run");
 const stopButton = document.getElementById("stop");
 const consoleButton = document.getElementById("copy-console");
@@ -364,17 +412,42 @@ function writeConsole(text){
   consoleElement.scrollTop = consoleElement.scrollHeight;
 }
 
+function refreshEditorHighlight(){
+  const lines=editor.value.split("\n");
+  editorHighlight.replaceChildren();
+  lines.forEach((line,index)=>{
+    const row=document.createElement("div");
+    if(index+1===editorErrorLine) row.className="editor-error-line";
+    row.textContent=line||" ";
+    editorHighlight.appendChild(row);
+  });
+  editorHighlight.scrollTop=editor.scrollTop;
+  editorHighlight.scrollLeft=editor.scrollLeft;
+  lastEditorValue=editor.value;
+}
+
 function jumpToLine(line){
   const lines=editor.value.split("\n");
   const target=Math.max(1,Math.min(lines.length,Number(line)||1));
   let start=0;
   for(let i=1;i<target;i++) start+=lines[i-1].length+1;
-  const end=start+(lines[target-1]||"").length;
+  editorErrorLine=target;
   editor.focus();
-  editor.setSelectionRange(start,end);
+  editor.setSelectionRange(start,start);
   const lineHeight=parseFloat(getComputedStyle(editor).lineHeight)||22;
   editor.scrollTop=Math.max(0,(target-1)*lineHeight);
+  refreshEditorHighlight();
 }
+
+editor.addEventListener("scroll",()=>{
+  editorHighlight.scrollTop=editor.scrollTop;
+  editorHighlight.scrollLeft=editor.scrollLeft;
+});
+
+editor.addEventListener("keyup",()=>{
+  if(editor.value!==lastEditorValue) editorErrorLine=null;
+  refreshEditorHighlight();
+});
 
 function addOutput(text){
   outputLines.push(String(text));
@@ -1430,12 +1503,15 @@ class ProgramParser{
       return {type:"return",value};
     }
 
-    const explicitDeclaration=this.rest().match(/^(?:let|var)\s+([a-z_$][a-z_$]*)\s*=\s*/i);
+    const explicitDeclaration=this.rest().match(/^(?:let|var)[ \t]+([a-z_$][a-z_$]*)(?:[ \t]*(=)[ \t]*)?/i);
     if(explicitDeclaration){
       this.position+=explicitDeclaration[0].length;
-      const value=this.readExpressionUntilBoundary();
-      if(!value) throw new Error("Deklaration benötigt einen Startwert.");
-      return {type:"declareExpr",name:explicitDeclaration[1].toLowerCase(),value};
+      if(explicitDeclaration[2]){
+        const value=this.readExpressionUntilBoundary();
+        if(!value) throw new Error("Deklaration benötigt einen Startwert.");
+        return {type:"declareExpr",name:explicitDeclaration[1].toLowerCase(),value};
+      }
+      return {type:"declare",name:explicitDeclaration[1].toLowerCase(),value:0};
     }
 
     const arrayDeclaration=this.rest().match(/^array\s+([a-z_$][a-z_$]*)\s*\[/i);
@@ -2496,6 +2572,11 @@ editor.addEventListener("input",event=>{
   autoOpenBlockBeforeCommand();
 });
 
+editor.addEventListener("input",()=>{
+  editorErrorLine=null;
+  queueMicrotask(refreshEditorHighlight);
+});
+
 function normalizeKey(key){
   if(key==="ArrowUp") return "up";
   if(key==="ArrowDown") return "down";
@@ -2659,6 +2740,7 @@ consoleInput.addEventListener("keydown",event=>{
 });
 
 editor.value = "";
+refreshEditorHighlight();
 clearCanvas();
 updatePosition();
 </script>
