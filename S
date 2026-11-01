@@ -978,6 +978,18 @@ class ProgramParser{
     const remaining = this.rest();
     let match;
 
+    match = remaining.match(/^wait\\s*([-+]?(?:\\d+(?:\\.\\d*)?|\\.\\d+))/i);
+
+    if(match){
+      this.position += match[0].length;
+
+      return {
+        type:"command",
+        command:"wait",
+        args:[Number(match[1])]
+      };
+    }
+
     match = remaining.match(
       /^(?:goto|move)\s*([-+]?(?:\d+(?:\.\d*)?|\.\d+)|[a-z_$][a-z_$]*)\s*,\s*([-+]?(?:\d+(?:\.\d*)?|\.\d+)|[a-z_$][a-z_$]*)/i
     );
@@ -1134,7 +1146,7 @@ class ProgramParser{
     }
 
     const compactDeclarations = this.rest().match(
-      /^((?:[a-z_$]+0)+)(?=$|[\s;{}]|(?:penoff|penon|pensize|pencolor|color|thickness|penwidth|goto|move|clear|stop|cls|break|print))/i
+      /^((?:[a-z_$]+0)+)(?=$|[\s;{}]|(?:penoff|penon|pensize|pencolor|color|thickness|penwidth|goto|move|wait|clear|stop|cls|break|print))/i
     );
 
     if(compactDeclarations){
@@ -1372,6 +1384,24 @@ async function executeCommand(node){
   const args = node.args;
 
   switch(command){
+    case "wait":{
+      const duration = Number(args[0]);
+
+      if(!Number.isFinite(duration)||duration<0){
+        throw new Error("wait benötigt eine positive Millisekunden-Zahl.");
+      }
+
+      let remaining = duration;
+
+      while(remaining>0&&!stopped&&!breakRequested){
+        const interval = Math.min(remaining,50);
+        await new Promise(resolve=>setTimeout(resolve,interval));
+        remaining -= interval;
+      }
+
+      return;
+    }
+
     case "goto":
       if(!node._compiledArgs){
         node._compiledArgs = [compileToken(args[0]),compileToken(args[1])];
