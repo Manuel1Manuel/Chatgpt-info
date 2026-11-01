@@ -978,7 +978,7 @@ class ProgramParser{
     const remaining = this.rest();
     let match;
 
-    match = remaining.match(/^wait\\s*([-+]?(?:\\d+(?:\\.\\d*)?|\\.\\d+))/i);
+    match = remaining.match(/^wait\s*([-+]?(?:\d+(?:\.\d*)?|\.\d+))/i);
 
     if(match){
       this.position += match[0].length;
