@@ -1642,7 +1642,7 @@ function findEnclosingLoop(source,position){
 
     if(character==="{"){
       const header = source.slice(segmentStart,i).trim();
-      const isLoop = /^(?:true|while\s+.+)$/i.test(header);
+      const isLoop = /^(?:true|while\s*.+)$/i.test(header);
       const lineStart = source.lastIndexOf("\n",i-1)+1;
       const indent = (source.slice(lineStart,i).match(/^[ \t]*/) || [""])[0];
 
