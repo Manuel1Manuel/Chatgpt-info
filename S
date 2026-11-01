@@ -235,7 +235,7 @@ button:active{filter:brightness(.9)}
       <button id="stop">Stopp</button>
       <button id="copy-console">Konsole kopieren</button>
       <button id="copy-code">Code kopieren</button>
-      <span id="build-tools"><span id="build-version">12</span><button id="virtual-key-toggle" type="button" aria-label="Tastatur ein- oder ausblenden">T</button></span>
+      <span id="build-tools"><span id="build-version">13</span><button id="virtual-key-toggle" type="button" aria-label="Tastatur ein- oder ausblenden">T</button></span>
     </div>
 
     <div id="virtual-keyboard" hidden>
@@ -1040,11 +1040,41 @@ class ProgramParser{
     };
   }
 
+  readTextUntilBoundary(){
+    const start=this.position;
+    let parentheses=0,brackets=0;
+    while(this.position<this.source.length){
+      const character=this.source[this.position];
+      if(character==="(") parentheses++;
+      else if(character===")") parentheses--;
+      else if(character==="[") brackets++;
+      else if(character==="]") brackets--;
+      if(parentheses===0&&brackets===0&&/[;\n\r{}]/.test(character)) break;
+      this.position++;
+    }
+    return this.source.slice(start,this.position).trim();
+  }
+
   readExpressionUntilBoundary(){
     const start=this.position;
     let parentheses=0,brackets=0;
     while(this.position<this.source.length){
       const character=this.source[this.position];
+      if(parentheses===0&&brackets===0&&/\s/.test(character)){
+        let next=this.position;
+        while(next<this.source.length&&/\s/.test(this.source[next])) next++;
+        const nextCharacter=this.source[next]||"";
+        const previousCharacter=this.source[this.position-1]||"";
+        const rest=this.source.slice(next);
+        const nextStatement=/^(?:goto|move|pencolor|color|thickness|penwidth|pensize|wait|print|penoff|penon|clear|stop|cls|break|continue|if|while|else|array|function|fn|let|var|true)\b/i.test(rest)||
+          /^[a-z_$][a-z_$]*(?:\s*\[[^\]\n]+\])?\s*(?:\+\+|--|\+=|-=|\*=|\/=|=)/i.test(rest);
+        const operatorGap=/[=+\-*/^(,\[]/.test(previousCharacter)||/[+\-*/^(),\]]/.test(nextCharacter);
+        const adjacentValues=/[a-z0-9_$)\]]/i.test(previousCharacter)&&/[a-z0-9_$.(]/i.test(nextCharacter)&&nextCharacter!=="(";
+        if(nextStatement||(adjacentValues&&!operatorGap)) break;
+        if(next===this.position) break;
+        this.position=next;
+        continue;
+      }
       if(character==="(") parentheses++;
       else if(character===")") parentheses--;
       else if(character==="[") brackets++;
@@ -1272,22 +1302,10 @@ class ProgramParser{
         if(/[;\n\r{}]/.test(character)&&depth===0) break;
       }
       if(comma<0) throw new Error("goto benötigt zwei Zahlenwerte, getrennt durch ein Komma.");
-      let end=comma+1;
-      depth=0;
-      while(end<this.source.length){
-        const character=this.source[end];
-        if(character==="(") depth++;
-        if(character===")"){
-          depth--;
-          if(depth<0) throw new Error("Unerwartete schließende Klammer.");
-        }
-        if(/[;\n\r{}]/.test(character)&&depth===0) break;
-        end++;
-      }
       const first=this.source.slice(start,comma).trim();
-      const second=this.source.slice(comma+1,end).trim();
+      this.position=comma+1;
+      const second=this.readExpressionUntilBoundary();
       if(!first||!second) throw new Error("goto benötigt zwei Zahlenwerte.");
-      this.position=end;
       return {type:"command",command:"goto",args:[first,second]};
     }
 
@@ -1326,7 +1344,7 @@ class ProgramParser{
         value=this.source.slice(this.position,end);
         this.position=end+1;
       }else{
-        value=this.readExpressionUntilBoundary();
+        value=this.readTextUntilBoundary();
       }
       return {type:"command",command:"print",args:[value],literal};
     }
