@@ -1633,8 +1633,96 @@ function autoDeclareConditionVariable(){
   return true;
 }
 
+function findEnclosingLoop(source,position){
+  const stack = [];
+  let segmentStart = 0;
+
+  for(let i=0;i<position;i++){
+    const character = source[i];
+
+    if(character==="{"){
+      const header = source.slice(segmentStart,i).trim();
+      const isLoop = /^(?:true|while\\s+.+)$/i.test(header);
+      const lineStart = source.lastIndexOf("\\n",i-1)+1;
+      const indent = (source.slice(lineStart,i).match(/^[ \\t]*/) || [""])[0];
+
+      stack.push({
+        isLoop,
+        openIndex:i,
+        indent
+      });
+
+      segmentStart = i+1;
+    }else if(character==="}"){
+      stack.pop();
+      segmentStart = i+1;
+    }
+  }
+
+  for(let i=stack.length-1;i>=0;i--){
+    if(stack[i].isLoop) return stack[i];
+  }
+
+  return null;
+}
+
+function autoDeclareLoopVariables(){
+  const info = getCurrentLineInfo();
+  const beforeCursor = info.line.slice(0,info.cursor-info.lineStart);
+  const loop = findEnclosingLoop(info.value,info.lineStart);
+
+  if(!loop) return false;
+
+  const statement = beforeCursor.trim();
+  const match = statement.match(
+    /^([a-z_$][a-z_$]*)(\\+\\+|--|\\+=|-=|\\*=|\\/=|=)([a-z_$][a-z_$]*|[-+]?(?:\\d+(?:\\.\\d*)?|\\.\\d+))?$/i
+  );
+
+  if(!match) return false;
+
+  const names = [match[1].toLowerCase()];
+  if(match[3]&&/^[a-z_$][a-z_$]*$/i.test(match[3])){
+    names.push(match[3].toLowerCase());
+  }
+
+  const declared = getDeclaredNames(info.value.slice(0,info.lineStart));
+  const missing = [...new Set(names)].filter(name=>
+    name!=="x"&&name!=="y"&&!isKeyPressName(name)&&!declared.has(name)
+  );
+
+  if(!missing.length) return false;
+
+  const declaration = missing.map(name=>name+"0").join("");
+  const newline = info.value.indexOf("\\n",loop.openIndex);
+
+  if(newline<0){
+    const insertion = "\\n"+loop.indent+"\\t"+declaration+"\\n"+loop.indent+"\\t";
+    editor.value =
+      info.value.slice(0,loop.openIndex+1)+
+      insertion+
+      info.value.slice(loop.openIndex+1);
+    const shift = insertion.length;
+    editor.selectionStart = editor.selectionEnd = info.cursor+shift;
+    return true;
+  }
+
+  const insertionPoint = newline+1;
+  const insertion = loop.indent+"\\t"+declaration+"\\n";
+
+  editor.value =
+    info.value.slice(0,insertionPoint)+
+    insertion+
+    info.value.slice(insertionPoint);
+
+  editor.selectionStart = editor.selectionEnd = info.cursor+insertion.length;
+  return true;
+}
+
 function autoDeclareAssignmentVariable(){
   const info = getCurrentLineInfo();
+
+  if(findEnclosingLoop(info.value,info.lineStart)) return false;
+
   const beforeCursor = info.line.slice(0,info.cursor-info.lineStart);
 
   if(findIncompleteCondition(beforeCursor)) return false;
@@ -1826,6 +1914,8 @@ function completeBlockWithTab(){
 }
 
 editor.addEventListener("input",()=>{
+  if(autoDeclareLoopVariables()) return;
+
   const insertedCondition = autoDeclareConditionVariable();
 
   if(!insertedCondition){
