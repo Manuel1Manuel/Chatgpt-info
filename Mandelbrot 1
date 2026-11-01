@@ -1,0 +1,3243 @@
+
+#define NOMINMAX
+#include <windows.h>
+#include <windowsx.h>
+#include <cuda_runtime.h>
+#include <cmath>
+#include <cstdio>
+#include <chrono>
+#include <thread>
+#include <vector>
+#include <mutex>
+#include <condition_variable>
+#include <atomic>
+#include <functional>
+#include <cstdint>
+#include <utility>
+#include <algorithm>
+#include <cstring>
+
+#pragma comment(lib, "user32.lib")
+#pragma comment(lib, "gdi32.lib")
+
+const int MAX_WIDTH = 3840;
+const int MAX_HEIGHT = 2160;
+
+const int ID_ITERATIONS = 101;
+const int ID_RESOLUTION = 102;
+const int ID_CPU_SHARE = 103;
+const int ID_AUTO_BUTTON = 104;
+const int ID_PARTIAL_BUTTON = 105;
+
+const UINT WM_SLIDER_CHANGED = WM_APP + 1;
+
+const int IMAGE_TOP = 34;
+const int CONTROL_AREA_HEIGHT = 94;
+
+const double PAN_SPEED = 2.0;
+const double PAN_SMOOTHING_RATE = 18.0;
+
+const double ZOOM_MAX_RATE = 9.0;
+const double ZOOM_ACCELERATION = 40.0;
+const double ZOOM_DAMPING = 6.0;
+
+const double ZOOM_SAFETY_LIMIT = 1.0e28;
+const double DEEP_ZOOM_THRESHOLD = 1.0e10;
+
+struct DoubleDouble {
+    double hi;
+    double lo;
+};
+
+DoubleDouble centerX = { -0.5, 0.0 };
+DoubleDouble centerY = { 0.0, 0.0 };
+
+double zoom = 1.0;
+
+double panVelocityX = 0.0;
+double panVelocityY = 0.0;
+double zoomVelocity = 0.0;
+
+int maxIterations = 500;
+int resolutionBlockSize = 1;
+
+int appliedCpuShare = 25;
+int pendingCpuShare = 25;
+
+bool shareChangePending = false;
+bool autoBalanceEnabled = false;
+bool partialUpdatesEnabled = false;
+
+bool isFullscreen = false;
+LONG_PTR windowedStyle = 0;
+LONG_PTR windowedExStyle = 0;
+WINDOWPLACEMENT windowedPlacement = { sizeof(WINDOWPLACEMENT) };
+
+bool fKeyWasDown = false;
+bool escKeyWasDown = false;
+
+bool displayImageAvailable = false;
+int displayWidth = 0;
+int displayHeight = 0;
+
+int currentGpuUsage = -1;
+int currentCpuUsage = -1;
+
+double cpuRowsPerMs = 0.0;
+double gpuRowsPerMs = 0.0;
+
+bool cpuRateInitialized = false;
+bool gpuRateInitialized = false;
+
+unsigned long long cpuRateVersion = 0;
+unsigned long long gpuRateVersion = 0;
+unsigned long long lastAutoCpuVersion = 0;
+unsigned long long lastAutoGpuVersion = 0;
+
+uchar4* devicePixels = nullptr;
+uchar4* gpuHostPixels = nullptr;
+
+std::vector<uchar4> cpuPixels;
+std::vector<uchar4> displayPixels;
+
+HWND windowHandle = nullptr;
+HWND statusLabel = nullptr;
+HWND gpuShareLabel = nullptr;
+HWND cpuShareLabel = nullptr;
+HWND iterationLabel = nullptr;
+HWND resolutionLabel = nullptr;
+HWND cpuShareSlider = nullptr;
+HWND iterationSlider = nullptr;
+HWND resolutionSlider = nullptr;
+HWND autoButton = nullptr;
+HWND partialButton = nullptr;
+
+HFONT uiFont = nullptr;
+HFONT statusFont = nullptr;
+
+BITMAPINFO bitmapInfo = {};
+
+HMODULE nvmlLibrary = nullptr;
+void* nvmlDevice = nullptr;
+
+typedef int nvmlReturn_t;
+
+struct NvmlUtilization {
+    unsigned int gpu;
+    unsigned int memory;
+};
+
+typedef nvmlReturn_t(__cdecl* NvmlInit)();
+typedef nvmlReturn_t(__cdecl* NvmlGetDevice)(unsigned int, void**);
+typedef nvmlReturn_t(__cdecl* NvmlGetUtilization)(void*, NvmlUtilization*);
+typedef nvmlReturn_t(__cdecl* NvmlShutdown)();
+
+NvmlInit nvmlInitFunction = nullptr;
+NvmlGetDevice nvmlGetDeviceFunction = nullptr;
+NvmlGetUtilization nvmlGetUtilizationFunction = nullptr;
+NvmlShutdown nvmlShutdownFunction = nullptr;
+
+bool nvmlAvailable = false;
+
+struct SliderData {
+    int id;
+    int minimum;
+    int maximum;
+    int value;
+    bool dragging;
+};
+
+SliderData iterationSliderData = {
+    ID_ITERATIONS, 100, 3000, 500, false
+};
+
+SliderData resolutionSliderData = {
+    ID_RESOLUTION, 1, 16, 1, false
+};
+
+SliderData cpuShareSliderData = {
+    ID_CPU_SHARE, 0, 100, 25, false
+};
+
+struct RenderConfig {
+    int width;
+    int height;
+    int clientWidth;
+    int clientHeight;
+    int imageTop;
+    int areaHeight;
+
+    int blockSize;
+    int blockColumns;
+    int totalBlockRows;
+
+    int gpuBlockRows;
+    int cpuStartBlockRow;
+    int cpuBlockRows;
+
+    int gpuPixelRows;
+    int cpuPixelStart;
+    int cpuPixelEnd;
+
+    int iterations;
+
+    double zoomValue;
+
+    DoubleDouble cx;
+    DoubleDouble cy;
+
+    bool highPrecision;
+};
+
+class CpuWorkerPool {
+private:
+    std::vector<std::thread> workers;
+    std::mutex mutex;
+    std::condition_variable wakeCondition;
+    std::condition_variable doneCondition;
+    std::atomic<int> nextRow{ 0 };
+    std::atomic<bool> taskDone{ true };
+
+    std::function<void(int)> currentTask;
+
+    int endRow = 0;
+    int pendingWorkers = 0;
+
+    unsigned long long generation = 0;
+    bool stopping = false;
+
+    void workerLoop()
+    {
+        unsigned long long seenGeneration = 0;
+
+        while (true)
+        {
+            std::function<void(int)> task;
+            int localEndRow = 0;
+
+            {
+                std::unique_lock<std::mutex> lock(mutex);
+
+                wakeCondition.wait(lock, [this, &seenGeneration]()
+                {
+                    return stopping || generation != seenGeneration;
+                });
+
+                if (stopping)
+                    return;
+
+                seenGeneration = generation;
+                task = currentTask;
+                localEndRow = endRow;
+            }
+
+            int row;
+
+            while ((row = nextRow.fetch_add(1)) < localEndRow)
+                task(row);
+
+            {
+                std::lock_guard<std::mutex> lock(mutex);
+
+                pendingWorkers--;
+
+                if (pendingWorkers == 0)
+                {
+                    currentTask = nullptr;
+                    taskDone.store(true, std::memory_order_release);
+                    doneCondition.notify_one();
+                }
+            }
+        }
+    }
+
+public:
+    CpuWorkerPool()
+    {
+        unsigned int count = std::thread::hardware_concurrency();
+
+        if (count < 1)
+            count = 1;
+
+        if (count > 1)
+            count--;
+
+        if (count > 32)
+            count = 32;
+
+        workers.reserve(count);
+
+        for (unsigned int i = 0; i < count; i++)
+            workers.emplace_back(&CpuWorkerPool::workerLoop, this);
+    }
+
+    ~CpuWorkerPool()
+    {
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            stopping = true;
+        }
+
+        wakeCondition.notify_all();
+
+        for (auto& worker : workers)
+        {
+            if (worker.joinable())
+                worker.join();
+        }
+    }
+
+    void dispatch(
+        int startRow,
+        int finishRow,
+        std::function<void(int)> task
+    )
+    {
+        if (startRow >= finishRow)
+        {
+            taskDone.store(true, std::memory_order_release);
+            return;
+        }
+
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+
+            currentTask = std::move(task);
+            nextRow.store(startRow);
+            endRow = finishRow;
+            pendingWorkers = (int)workers.size();
+
+            taskDone.store(false, std::memory_order_release);
+            generation++;
+        }
+
+        wakeCondition.notify_all();
+    }
+
+    bool isDone() const
+    {
+        return taskDone.load(std::memory_order_acquire);
+    }
+
+    void wait()
+    {
+        std::unique_lock<std::mutex> lock(mutex);
+
+        doneCondition.wait(lock, [this]()
+        {
+            return pendingWorkers == 0;
+        });
+    }
+};
+
+class ProcessCpuMeter {
+private:
+    bool initialized = false;
+    ULONGLONG previousSystemTime = 0;
+    ULONGLONG previousProcessTime = 0;
+
+    ULONGLONG fileTimeValue(FILETIME value)
+    {
+        ULARGE_INTEGER result;
+        result.LowPart = value.dwLowDateTime;
+        result.HighPart = value.dwHighDateTime;
+        return result.QuadPart;
+    }
+
+public:
+    int sample()
+    {
+        FILETIME idleTime = {};
+        FILETIME kernelTime = {};
+        FILETIME userTime = {};
+
+        FILETIME creationTime = {};
+        FILETIME exitTime = {};
+        FILETIME processKernelTime = {};
+        FILETIME processUserTime = {};
+
+        if (!GetSystemTimes(&idleTime, &kernelTime, &userTime))
+            return -1;
+
+        if (!GetProcessTimes(
+            GetCurrentProcess(),
+            &creationTime,
+            &exitTime,
+            &processKernelTime,
+            &processUserTime))
+            return -1;
+
+        ULONGLONG systemTime =
+            fileTimeValue(kernelTime) +
+            fileTimeValue(userTime);
+
+        ULONGLONG processTime =
+            fileTimeValue(processKernelTime) +
+            fileTimeValue(processUserTime);
+
+        if (!initialized)
+        {
+            previousSystemTime = systemTime;
+            previousProcessTime = processTime;
+            initialized = true;
+            return -1;
+        }
+
+        ULONGLONG systemDifference =
+            systemTime - previousSystemTime;
+
+        ULONGLONG processDifference =
+            processTime - previousProcessTime;
+
+        previousSystemTime = systemTime;
+        previousProcessTime = processTime;
+
+        if (systemDifference == 0)
+            return -1;
+
+        int usage = (int)std::lround(
+            100.0 * (double)processDifference / (double)systemDifference
+        );
+
+        if (usage < 0)
+            usage = 0;
+
+        if (usage > 100)
+            usage = 100;
+
+        return usage;
+    }
+};
+
+__host__ __device__ inline DoubleDouble ddFromDouble(double value)
+{
+    return { value, 0.0 };
+}
+
+__host__ __device__ inline DoubleDouble ddNormalize(double high, double low)
+{
+    double sum = high + low;
+    double error = low - (sum - high);
+
+    return { sum, error };
+}
+
+__host__ __device__ inline DoubleDouble ddAdd(
+    DoubleDouble a,
+    DoubleDouble b
+)
+{
+    double sum = a.hi + b.hi;
+    double virtualB = sum - a.hi;
+
+    double error =
+        (a.hi - (sum - virtualB)) +
+        (b.hi - virtualB) +
+        a.lo +
+        b.lo;
+
+    return ddNormalize(sum, error);
+}
+
+__host__ __device__ inline DoubleDouble ddSub(
+    DoubleDouble a,
+    DoubleDouble b
+)
+{
+    DoubleDouble negative = { -b.hi, -b.lo };
+    return ddAdd(a, negative);
+}
+
+__host__ __device__ inline double ddFma(
+    double a,
+    double b,
+    double c
+)
+{
+#ifdef __CUDA_ARCH__
+    return __fma_rn(a, b, c);
+#else
+    return std::fma(a, b, c);
+#endif
+}
+
+__host__ __device__ inline DoubleDouble ddMul(
+    DoubleDouble a,
+    DoubleDouble b
+)
+{
+    double product = a.hi * b.hi;
+
+    double error = ddFma(a.hi, b.hi, -product);
+    error += a.hi * b.lo;
+    error += a.lo * b.hi;
+    error += a.lo * b.lo;
+
+    return ddNormalize(product, error);
+}
+
+__host__ __device__ inline int ddCompare(
+    DoubleDouble a,
+    DoubleDouble b
+)
+{
+    if (a.hi < b.hi)
+        return -1;
+
+    if (a.hi > b.hi)
+        return 1;
+
+    if (a.lo < b.lo)
+        return -1;
+
+    if (a.lo > b.lo)
+        return 1;
+
+    return 0;
+}
+
+__host__ __device__ inline double ddToDouble(DoubleDouble value)
+{
+    return value.hi + value.lo;
+}
+
+bool checkCuda(cudaError_t error)
+{
+    if (error != cudaSuccess)
+    {
+        char message[512];
+        sprintf_s(message, "CUDA-Fehler:\n%s", cudaGetErrorString(error));
+        MessageBoxA(nullptr, message, "CUDA-Fehler", MB_ICONERROR);
+        return false;
+    }
+
+    return true;
+}
+
+void initializeNvml()
+{
+    nvmlLibrary = LoadLibraryA("nvml.dll");
+
+    if (!nvmlLibrary)
+    {
+        char systemPath[MAX_PATH];
+        GetSystemDirectoryA(systemPath, MAX_PATH);
+        strcat_s(systemPath, "\\nvml.dll");
+        nvmlLibrary = LoadLibraryA(systemPath);
+    }
+
+    if (!nvmlLibrary)
+        return;
+
+    nvmlInitFunction =
+        (NvmlInit)GetProcAddress(nvmlLibrary, "nvmlInit_v2");
+
+    nvmlGetDeviceFunction =
+        (NvmlGetDevice)GetProcAddress(
+            nvmlLibrary,
+            "nvmlDeviceGetHandleByIndex_v2"
+        );
+
+    nvmlGetUtilizationFunction =
+        (NvmlGetUtilization)GetProcAddress(
+            nvmlLibrary,
+            "nvmlDeviceGetUtilizationRates"
+        );
+
+    nvmlShutdownFunction =
+        (NvmlShutdown)GetProcAddress(nvmlLibrary, "nvmlShutdown");
+
+    if (!nvmlInitFunction ||
+        !nvmlGetDeviceFunction ||
+        !nvmlGetUtilizationFunction)
+        return;
+
+    if (nvmlInitFunction() != 0)
+        return;
+
+    if (nvmlGetDeviceFunction(0, &nvmlDevice) != 0)
+    {
+        if (nvmlShutdownFunction)
+            nvmlShutdownFunction();
+
+        return;
+    }
+
+    nvmlAvailable = true;
+}
+
+int getGpuUsage()
+{
+    if (!nvmlAvailable)
+        return -1;
+
+    NvmlUtilization utilization = {};
+
+    if (nvmlGetUtilizationFunction(nvmlDevice, &utilization) != 0)
+        return -1;
+
+    return (int)utilization.gpu;
+}
+
+__host__ __device__ uchar4 computeMandelbrotPixelDouble(
+    int x,
+    int y,
+    int width,
+    int height,
+    double cx,
+    double cy,
+    double zoomValue,
+    int iterations
+)
+{
+    int smallerDimension = width < height ? width : height;
+
+    double scale =
+        3.5 / ((double)smallerDimension * zoomValue);
+
+    double cr =
+        cx + ((double)x - width * 0.5) * scale;
+
+    double ci =
+        cy + (height * 0.5 - (double)y) * scale;
+
+    double q =
+        (cr - 0.25) * (cr - 0.25) + ci * ci;
+
+    if (q * (q + cr - 0.25) <= 0.25 * ci * ci ||
+        (cr + 1.0) * (cr + 1.0) + ci * ci <= 0.0625)
+    {
+        return make_uchar4(0, 0, 0, 255);
+    }
+
+    double zx = 0.0;
+    double zy = 0.0;
+    double magnitude = 0.0;
+
+    int iteration = 0;
+
+    while (magnitude <= 256.0 && iteration < iterations)
+    {
+        double nextX = zx * zx - zy * zy + cr;
+        zy = 2.0 * zx * zy + ci;
+        zx = nextX;
+
+        magnitude = zx * zx + zy * zy;
+        iteration++;
+    }
+
+    if (iteration >= iterations)
+        return make_uchar4(0, 0, 0, 255);
+
+    double smooth =
+        iteration + 1.0 - log2(log2(sqrt(magnitude)));
+
+    double t = smooth * 0.035;
+
+    unsigned char r =
+        (unsigned char)(127.5 + 127.5 * cos(t));
+
+    unsigned char g =
+        (unsigned char)(127.5 + 127.5 * cos(t + 2.094395102));
+
+    unsigned char b =
+        (unsigned char)(127.5 + 127.5 * cos(t + 4.188790205));
+
+    return make_uchar4(b, g, r, 255);
+}
+
+__host__ __device__ uchar4 computeMandelbrotPixelDeep(
+    int x,
+    int y,
+    int width,
+    int height,
+    DoubleDouble cx,
+    DoubleDouble cy,
+    double zoomValue,
+    int iterations
+)
+{
+    int smallerDimension = width < height ? width : height;
+
+    double scale =
+        3.5 / ((double)smallerDimension * zoomValue);
+
+    double offsetX =
+        ((double)x - width * 0.5) * scale;
+
+    double offsetY =
+        (height * 0.5 - (double)y) * scale;
+
+    DoubleDouble cr =
+        ddAdd(cx, ddFromDouble(offsetX));
+
+    DoubleDouble ci =
+        ddAdd(cy, ddFromDouble(offsetY));
+
+    DoubleDouble quarter = ddFromDouble(0.25);
+    DoubleDouble halfSquared = ddFromDouble(0.0625);
+    DoubleDouble bailout = ddFromDouble(256.0);
+
+    DoubleDouble xMinusQuarter =
+        ddSub(cr, quarter);
+
+    DoubleDouble ciSquared =
+        ddMul(ci, ci);
+
+    DoubleDouble q = ddAdd(
+        ddMul(xMinusQuarter, xMinusQuarter),
+        ciSquared
+    );
+
+    DoubleDouble cardioidLeft =
+        ddMul(q, ddAdd(q, xMinusQuarter));
+
+    DoubleDouble cardioidRight =
+        ddMul(quarter, ciSquared);
+
+    if (ddCompare(cardioidLeft, cardioidRight) <= 0)
+        return make_uchar4(0, 0, 0, 255);
+
+    DoubleDouble bulbX =
+        ddAdd(cr, ddFromDouble(1.0));
+
+    DoubleDouble bulbValue = ddAdd(
+        ddMul(bulbX, bulbX),
+        ciSquared
+    );
+
+    if (ddCompare(bulbValue, halfSquared) <= 0)
+        return make_uchar4(0, 0, 0, 255);
+
+    DoubleDouble zx = ddFromDouble(0.0);
+    DoubleDouble zy = ddFromDouble(0.0);
+    DoubleDouble magnitude = ddFromDouble(0.0);
+
+    int iteration = 0;
+
+    while (ddCompare(magnitude, bailout) <= 0 &&
+        iteration < iterations)
+    {
+        DoubleDouble zxSquared = ddMul(zx, zx);
+        DoubleDouble zySquared = ddMul(zy, zy);
+        DoubleDouble zxzy = ddMul(zx, zy);
+
+        DoubleDouble nextX = ddAdd(
+            ddSub(zxSquared, zySquared),
+            cr
+        );
+
+        DoubleDouble nextY = ddAdd(
+            ddMul(ddFromDouble(2.0), zxzy),
+            ci
+        );
+
+        zx = nextX;
+        zy = nextY;
+
+        magnitude = ddAdd(
+            ddMul(zx, zx),
+            ddMul(zy, zy)
+        );
+
+        iteration++;
+    }
+
+    if (iteration >= iterations)
+        return make_uchar4(0, 0, 0, 255);
+
+    double magnitudeValue = ddToDouble(magnitude);
+
+    double smooth =
+        iteration + 1.0 -
+        log2(log2(sqrt(magnitudeValue)));
+
+    double t = smooth * 0.035;
+
+    unsigned char r =
+        (unsigned char)(127.5 + 127.5 * cos(t));
+
+    unsigned char g =
+        (unsigned char)(127.5 + 127.5 * cos(t + 2.094395102));
+
+    unsigned char b =
+        (unsigned char)(127.5 + 127.5 * cos(t + 4.188790205));
+
+    return make_uchar4(b, g, r, 255);
+}
+
+__host__ __device__ uchar4 computeMandelbrotPixel(
+    int x,
+    int y,
+    int width,
+    int height,
+    DoubleDouble cx,
+    DoubleDouble cy,
+    double zoomValue,
+    int iterations,
+    bool highPrecision
+)
+{
+    if (highPrecision)
+    {
+        return computeMandelbrotPixelDeep(
+            x,
+            y,
+            width,
+            height,
+            cx,
+            cy,
+            zoomValue,
+            iterations
+        );
+    }
+
+    return computeMandelbrotPixelDouble(
+        x,
+        y,
+        width,
+        height,
+        ddToDouble(cx),
+        ddToDouble(cy),
+        zoomValue,
+        iterations
+    );
+}
+
+__host__ __device__ void renderMandelbrotBlock(
+    uchar4* pixels,
+    int width,
+    int height,
+    int blockSize,
+    int blockX,
+    int blockY,
+    DoubleDouble cx,
+    DoubleDouble cy,
+    double zoomValue,
+    int iterations,
+    bool highPrecision
+)
+{
+    int startX = blockX * blockSize;
+    int startY = blockY * blockSize;
+
+    int endX = startX + blockSize;
+    int endY = startY + blockSize;
+
+    if (endX > width)
+        endX = width;
+
+    if (endY > height)
+        endY = height;
+
+    if (startX >= width || startY >= height)
+        return;
+
+    int sampleX = (startX + endX - 1) / 2;
+    int sampleY = (startY + endY - 1) / 2;
+
+    uchar4 color = computeMandelbrotPixel(
+        sampleX,
+        sampleY,
+        width,
+        height,
+        cx,
+        cy,
+        zoomValue,
+        iterations,
+        highPrecision
+    );
+
+    for (int y = startY; y < endY; y++)
+    {
+        for (int x = startX; x < endX; x++)
+            pixels[y * width + x] = color;
+    }
+}
+
+__global__ void mandelbrotKernel(
+    uchar4* pixels,
+    int width,
+    int height,
+    int blockSize,
+    int blockColumns,
+    int firstBlockRow,
+    int blockRowCount,
+    DoubleDouble cx,
+    DoubleDouble cy,
+    double zoomValue,
+    int iterations,
+    bool highPrecision
+)
+{
+    int blockX =
+        blockIdx.x * blockDim.x + threadIdx.x;
+
+    int localBlockY =
+        blockIdx.y * blockDim.y + threadIdx.y;
+
+    if (blockX >= blockColumns ||
+        localBlockY >= blockRowCount)
+        return;
+
+    int blockY = firstBlockRow + localBlockY;
+
+    renderMandelbrotBlock(
+        pixels,
+        width,
+        height,
+        blockSize,
+        blockX,
+        blockY,
+        cx,
+        cy,
+        zoomValue,
+        iterations,
+        highPrecision
+    );
+}
+
+void renderCpuBlockRow(
+    uchar4* pixels,
+    const RenderConfig& config,
+    int blockRow
+)
+{
+    for (int blockX = 0;
+        blockX < config.blockColumns;
+        blockX++)
+    {
+        renderMandelbrotBlock(
+            pixels,
+            config.width,
+            config.height,
+            config.blockSize,
+            blockX,
+            blockRow,
+            config.cx,
+            config.cy,
+            config.zoomValue,
+            config.iterations,
+            config.highPrecision
+        );
+    }
+}
+
+RenderConfig makeRenderConfig(int cpuShare)
+{
+    RenderConfig config = {};
+
+    RECT rect;
+    GetClientRect(windowHandle, &rect);
+
+    config.clientWidth = rect.right;
+    config.clientHeight = rect.bottom;
+
+    config.imageTop = isFullscreen ? 0 : IMAGE_TOP;
+
+    int controlHeight =
+        isFullscreen ? 0 : CONTROL_AREA_HEIGHT;
+
+    config.areaHeight =
+        config.clientHeight - config.imageTop - controlHeight;
+
+    if (config.areaHeight < 1)
+        config.areaHeight = 1;
+
+    if (config.clientWidth < 1)
+        config.clientWidth = 1;
+
+    config.width = config.clientWidth;
+    config.height = config.areaHeight;
+
+    double sizeLimit = 1.0;
+
+    if (config.width > MAX_WIDTH)
+    {
+        double limit =
+            (double)MAX_WIDTH / config.width;
+
+        if (limit < sizeLimit)
+            sizeLimit = limit;
+    }
+
+    if (config.height > MAX_HEIGHT)
+    {
+        double limit =
+            (double)MAX_HEIGHT / config.height;
+
+        if (limit < sizeLimit)
+            sizeLimit = limit;
+    }
+
+    if (sizeLimit < 1.0)
+    {
+        config.width =
+            (int)std::floor(config.width * sizeLimit);
+
+        config.height =
+            (int)std::floor(config.height * sizeLimit);
+    }
+
+    if (config.width < 1)
+        config.width = 1;
+
+    if (config.height < 1)
+        config.height = 1;
+
+    config.blockSize = resolutionBlockSize;
+
+    if (config.blockSize < 1)
+        config.blockSize = 1;
+
+    if (config.blockSize > 16)
+        config.blockSize = 16;
+
+    config.blockColumns =
+        (config.width + config.blockSize - 1) /
+        config.blockSize;
+
+    config.totalBlockRows =
+        (config.height + config.blockSize - 1) /
+        config.blockSize;
+
+    if (cpuShare < 0)
+        cpuShare = 0;
+
+    if (cpuShare > 100)
+        cpuShare = 100;
+
+    int gpuShare = 100 - cpuShare;
+
+    config.gpuBlockRows = (int)std::lround(
+        config.totalBlockRows * (gpuShare / 100.0)
+    );
+
+    if (cpuShare == 0)
+        config.gpuBlockRows = config.totalBlockRows;
+
+    if (cpuShare == 100)
+        config.gpuBlockRows = 0;
+
+    if (cpuShare > 0 &&
+        cpuShare < 100 &&
+        config.totalBlockRows >= 2)
+    {
+        if (config.gpuBlockRows < 1)
+            config.gpuBlockRows = 1;
+
+        if (config.gpuBlockRows >= config.totalBlockRows)
+            config.gpuBlockRows = config.totalBlockRows - 1;
+    }
+
+    if (config.gpuBlockRows < 0)
+        config.gpuBlockRows = 0;
+
+    if (config.gpuBlockRows > config.totalBlockRows)
+        config.gpuBlockRows = config.totalBlockRows;
+
+    config.cpuStartBlockRow = config.gpuBlockRows;
+
+    config.cpuBlockRows =
+        config.totalBlockRows - config.gpuBlockRows;
+
+    config.gpuPixelRows =
+        config.gpuBlockRows * config.blockSize;
+
+    if (config.gpuPixelRows > config.height)
+        config.gpuPixelRows = config.height;
+
+    config.cpuPixelStart = config.gpuPixelRows;
+    config.cpuPixelEnd = config.height;
+
+    config.iterations = maxIterations;
+    config.zoomValue = zoom;
+
+    config.cx = centerX;
+    config.cy = centerY;
+
+    config.highPrecision =
+        zoom >= DEEP_ZOOM_THRESHOLD;
+
+    return config;
+}
+
+bool sameLayout(
+    const RenderConfig& a,
+    const RenderConfig& b
+)
+{
+    return
+        a.width == b.width &&
+        a.height == b.height &&
+        a.clientWidth == b.clientWidth &&
+        a.clientHeight == b.clientHeight &&
+        a.imageTop == b.imageTop &&
+        a.areaHeight == b.areaHeight &&
+        a.blockSize == b.blockSize &&
+        a.gpuBlockRows == b.gpuBlockRows;
+}
+
+RenderConfig activeLayoutConfig = {};
+bool activeLayoutValid = false;
+
+void applyLayout(const RenderConfig& config)
+{
+    bool dimensionsChanged =
+        !displayImageAvailable ||
+        displayWidth != config.width ||
+        displayHeight != config.height;
+
+    displayWidth = config.width;
+    displayHeight = config.height;
+    displayImageAvailable = true;
+
+    if (dimensionsChanged)
+    {
+        size_t pixels =
+            (size_t)config.width * config.height;
+
+        std::fill(
+            displayPixels.begin(),
+            displayPixels.begin() + pixels,
+            make_uchar4(0, 0, 0, 255)
+        );
+    }
+
+    activeLayoutConfig = config;
+    activeLayoutValid = true;
+
+    RECT updateRect = {
+        0,
+        config.imageTop,
+        config.clientWidth,
+        config.imageTop + config.areaHeight
+    };
+
+    InvalidateRect(windowHandle, &updateRect, FALSE);
+}
+
+bool layoutMatchesActive(const RenderConfig& config)
+{
+    return activeLayoutValid &&
+        sameLayout(config, activeLayoutConfig);
+}
+
+void publishRegion(
+    const uchar4* source,
+    int startRow,
+    int endRow,
+    const RenderConfig& config
+)
+{
+    if (startRow >= endRow)
+        return;
+
+    if (!IsWindow(windowHandle))
+        return;
+
+    if (!displayImageAvailable ||
+        config.width != displayWidth ||
+        config.height != displayHeight)
+        return;
+
+    size_t rowBytes =
+        (size_t)config.width * sizeof(uchar4);
+
+    size_t copyBytes =
+        (size_t)(endRow - startRow) * rowBytes;
+
+    memcpy(
+        displayPixels.data() +
+            (size_t)startRow * config.width,
+        source +
+            (size_t)startRow * config.width,
+        copyBytes
+    );
+
+    int destinationTop =
+        config.imageTop +
+        MulDiv(startRow, config.areaHeight, config.height);
+
+    int destinationBottom =
+        config.imageTop +
+        MulDiv(endRow, config.areaHeight, config.height);
+
+    if (destinationBottom <= destinationTop)
+        destinationBottom = destinationTop + 1;
+
+    RECT updateRect = {
+        0,
+        destinationTop,
+        config.clientWidth,
+        destinationBottom
+    };
+
+    InvalidateRect(windowHandle, &updateRect, FALSE);
+}
+
+void publishFullFrame(const RenderConfig& config)
+{
+    if (!IsWindow(windowHandle))
+        return;
+
+    if (!displayImageAvailable ||
+        config.width != displayWidth ||
+        config.height != displayHeight)
+        return;
+
+    if (config.gpuPixelRows > 0)
+    {
+        size_t bytes =
+            (size_t)config.gpuPixelRows *
+            config.width *
+            sizeof(uchar4);
+
+        memcpy(
+            displayPixels.data(),
+            gpuHostPixels,
+            bytes
+        );
+    }
+
+    if (config.cpuPixelStart < config.cpuPixelEnd)
+    {
+        size_t rows =
+            config.cpuPixelEnd - config.cpuPixelStart;
+
+        size_t bytes =
+            rows * config.width * sizeof(uchar4);
+
+        memcpy(
+            displayPixels.data() +
+                (size_t)config.cpuPixelStart * config.width,
+            cpuPixels.data() +
+                (size_t)config.cpuPixelStart * config.width,
+            bytes
+        );
+    }
+
+    RECT updateRect = {
+        0,
+        config.imageTop,
+        config.clientWidth,
+        config.imageTop + config.areaHeight
+    };
+
+    InvalidateRect(windowHandle, &updateRect, FALSE);
+}
+
+void requestCpuShare(int value)
+{
+    if (value < 0)
+        value = 0;
+
+    if (value > 100)
+        value = 100;
+
+    pendingCpuShare = value;
+    shareChangePending = pendingCpuShare != appliedCpuShare;
+
+    cpuShareSliderData.value = value;
+
+    if (cpuShareSlider)
+        InvalidateRect(cpuShareSlider, nullptr, FALSE);
+}
+
+void recordCpuRate(int rows, double milliseconds)
+{
+    if (rows <= 0 || milliseconds <= 0.01)
+        return;
+
+    double measuredRate = rows / milliseconds;
+
+    if (!cpuRateInitialized)
+    {
+        cpuRowsPerMs = measuredRate;
+        cpuRateInitialized = true;
+    }
+    else
+    {
+        cpuRowsPerMs =
+            cpuRowsPerMs * 0.8 +
+            measuredRate * 0.2;
+    }
+
+    cpuRateVersion++;
+}
+
+void recordGpuRate(int rows, double milliseconds)
+{
+    if (rows <= 0 || milliseconds <= 0.01)
+        return;
+
+    double measuredRate = rows / milliseconds;
+
+    if (!gpuRateInitialized)
+    {
+        gpuRowsPerMs = measuredRate;
+        gpuRateInitialized = true;
+    }
+    else
+    {
+        gpuRowsPerMs =
+            gpuRowsPerMs * 0.8 +
+            measuredRate * 0.2;
+    }
+
+    gpuRateVersion++;
+}
+
+void updateAutomaticBalance()
+{
+    if (!autoBalanceEnabled)
+        return;
+
+    if (!cpuRateInitialized ||
+        !gpuRateInitialized)
+        return;
+
+    if (cpuRateVersion == lastAutoCpuVersion ||
+        gpuRateVersion == lastAutoGpuVersion)
+        return;
+
+    lastAutoCpuVersion = cpuRateVersion;
+    lastAutoGpuVersion = gpuRateVersion;
+
+    double totalRate =
+        cpuRowsPerMs + gpuRowsPerMs;
+
+    if (totalRate <= 0.0)
+        return;
+
+    double idealCpuShare =
+        100.0 * cpuRowsPerMs / totalRate;
+
+    if (idealCpuShare < 1.0)
+        idealCpuShare = 1.0;
+
+    if (idealCpuShare > 99.0)
+        idealCpuShare = 99.0;
+
+    double adjustedShare =
+        appliedCpuShare +
+        (idealCpuShare - appliedCpuShare) * 0.25;
+
+    int newShare =
+        (int)std::lround(adjustedShare);
+
+    if (newShare < 1)
+        newShare = 1;
+
+    if (newShare > 99)
+        newShare = 99;
+
+    if (abs(newShare - appliedCpuShare) >= 1)
+        requestCpuShare(newShare);
+}
+
+void updateButtonTexts()
+{
+    if (autoButton)
+    {
+        SetWindowTextA(
+            autoButton,
+            autoBalanceEnabled ? "AUTO: AN" : "AUTO: AUS"
+        );
+    }
+
+    if (partialButton)
+    {
+        SetWindowTextA(
+            partialButton,
+            partialUpdatesEnabled
+                ? "TEILUPDATE: AN"
+                : "TEILUPDATE: AUS"
+        );
+    }
+}
+
+void updateShareLabels()
+{
+    if (!gpuShareLabel || !cpuShareLabel)
+        return;
+
+    int gpuShare = 100 - appliedCpuShare;
+    int cpuShare = appliedCpuShare;
+
+    char gpuText[128];
+    char cpuText[128];
+
+    if (currentGpuUsage >= 0)
+    {
+        sprintf_s(
+            gpuText,
+            "GPU: %d%% | Anteil: %d%%",
+            currentGpuUsage,
+            gpuShare
+        );
+    }
+    else
+    {
+        sprintf_s(
+            gpuText,
+            "GPU: --%% | Anteil: %d%%",
+            gpuShare
+        );
+    }
+
+    if (currentCpuUsage >= 0)
+    {
+        sprintf_s(
+            cpuText,
+            "CPU: %d%% | Anteil: %d%%",
+            currentCpuUsage,
+            cpuShare
+        );
+    }
+    else
+    {
+        sprintf_s(
+            cpuText,
+            "CPU: --%% | Anteil: %d%%",
+            cpuShare
+        );
+    }
+
+    SetWindowTextA(gpuShareLabel, gpuText);
+    SetWindowTextA(cpuShareLabel, cpuText);
+}
+
+void updateLabels()
+{
+    char text[128];
+
+    if (iterationLabel)
+    {
+        sprintf_s(
+            text,
+            "Maximale Iterationen: %d",
+            maxIterations
+        );
+
+        SetWindowTextA(iterationLabel, text);
+    }
+
+    if (resolutionLabel)
+    {
+        sprintf_s(
+            text,
+            "Pixelblock: %dx%d",
+            resolutionBlockSize,
+            resolutionBlockSize
+        );
+
+        SetWindowTextA(resolutionLabel, text);
+    }
+
+    updateShareLabels();
+    updateButtonTexts();
+}
+
+void updateSliderFromMouse(
+    HWND hwnd,
+    SliderData* data,
+    int mouseX
+)
+{
+    if (!data)
+        return;
+
+    RECT rect;
+    GetClientRect(hwnd, &rect);
+
+    int left = 12;
+    int right = rect.right - 12;
+
+    if (right <= left)
+        return;
+
+    if (mouseX < left)
+        mouseX = left;
+
+    if (mouseX > right)
+        mouseX = right;
+
+    double fraction =
+        (double)(mouseX - left) / (double)(right - left);
+
+    int newValue = data->minimum +
+        (int)std::lround(
+            fraction * (data->maximum - data->minimum)
+        );
+
+    if (newValue == data->value)
+        return;
+
+    data->value = newValue;
+
+    InvalidateRect(hwnd, nullptr, FALSE);
+
+    SendMessageA(
+        GetParent(hwnd),
+        WM_SLIDER_CHANGED,
+        (WPARAM)data->id,
+        (LPARAM)data->value
+    );
+}
+
+LRESULT CALLBACK SliderProcedure(
+    HWND hwnd,
+    UINT message,
+    WPARAM wParam,
+    LPARAM lParam
+)
+{
+    if (message == WM_NCCREATE)
+    {
+        CREATESTRUCTA* createInfo =
+            (CREATESTRUCTA*)lParam;
+
+        SetWindowLongPtrA(
+            hwnd,
+            GWLP_USERDATA,
+            (LONG_PTR)createInfo->lpCreateParams
+        );
+
+        return TRUE;
+    }
+
+    SliderData* data =
+        (SliderData*)GetWindowLongPtrA(
+            hwnd,
+            GWLP_USERDATA
+        );
+
+    switch (message)
+    {
+    case WM_ERASEBKGND:
+        return 1;
+
+    case WM_SETCURSOR:
+        SetCursor(LoadCursorA(nullptr, IDC_HAND));
+        return TRUE;
+
+    case WM_LBUTTONDOWN:
+        if (data)
+        {
+            data->dragging = true;
+            SetCapture(hwnd);
+            SetFocus(GetParent(hwnd));
+
+            updateSliderFromMouse(
+                hwnd,
+                data,
+                GET_X_LPARAM(lParam)
+            );
+        }
+
+        return 0;
+
+    case WM_MOUSEMOVE:
+        if (data && data->dragging)
+        {
+            updateSliderFromMouse(
+                hwnd,
+                data,
+                GET_X_LPARAM(lParam)
+            );
+        }
+
+        return 0;
+
+    case WM_LBUTTONUP:
+        if (data)
+        {
+            updateSliderFromMouse(
+                hwnd,
+                data,
+                GET_X_LPARAM(lParam)
+            );
+
+            data->dragging = false;
+
+            if (GetCapture() == hwnd)
+                ReleaseCapture();
+        }
+
+        return 0;
+
+    case WM_CAPTURECHANGED:
+        if (data)
+            data->dragging = false;
+
+        return 0;
+
+    case WM_PAINT:
+    {
+        PAINTSTRUCT ps;
+        HDC dc = BeginPaint(hwnd, &ps);
+
+        RECT rect;
+        GetClientRect(hwnd, &rect);
+
+        FillRect(
+            dc,
+            &rect,
+            (HBRUSH)GetStockObject(BLACK_BRUSH)
+        );
+
+        if (data)
+        {
+            int width = rect.right;
+            int height = rect.bottom;
+
+            int left = 12;
+            int right = width - 12;
+            int centerY = height / 2;
+
+            if (right > left)
+            {
+                double fraction = 0.0;
+
+                if (data->maximum > data->minimum)
+                {
+                    fraction =
+                        (double)(data->value - data->minimum) /
+                        (double)(data->maximum - data->minimum);
+                }
+
+                if (fraction < 0.0)
+                    fraction = 0.0;
+
+                if (fraction > 1.0)
+                    fraction = 1.0;
+
+                int thumbX =
+                    left +
+                    (int)std::lround(
+                        fraction * (right - left)
+                    );
+
+                HPEN trackPen = CreatePen(
+                    PS_SOLID,
+                    1,
+                    RGB(48, 60, 76)
+                );
+
+                HBRUSH trackBrush = CreateSolidBrush(
+                    RGB(38, 48, 62)
+                );
+
+                HGDIOBJ oldPen =
+                    SelectObject(dc, trackPen);
+
+                HGDIOBJ oldBrush =
+                    SelectObject(dc, trackBrush);
+
+                RoundRect(
+                    dc,
+                    left,
+                    centerY - 3,
+                    right,
+                    centerY + 4,
+                    8,
+                    8
+                );
+
+                SelectObject(dc, oldPen);
+                SelectObject(dc, oldBrush);
+
+                DeleteObject(trackPen);
+                DeleteObject(trackBrush);
+
+                if (thumbX > left)
+                {
+                    HPEN fillPen = CreatePen(
+                        PS_SOLID,
+                        1,
+                        RGB(0, 190, 225)
+                    );
+
+                    HBRUSH fillBrush = CreateSolidBrush(
+                        RGB(0, 160, 205)
+                    );
+
+                    oldPen = SelectObject(dc, fillPen);
+                    oldBrush = SelectObject(dc, fillBrush);
+
+                    RoundRect(
+                        dc,
+                        left,
+                        centerY - 3,
+                        thumbX + 1,
+                        centerY + 4,
+                        8,
+                        8
+                    );
+
+                    SelectObject(dc, oldPen);
+                    SelectObject(dc, oldBrush);
+
+                    DeleteObject(fillPen);
+                    DeleteObject(fillBrush);
+                }
+
+                HPEN thumbPen = CreatePen(
+                    PS_SOLID,
+                    2,
+                    RGB(170, 245, 255)
+                );
+
+                HBRUSH thumbBrush = CreateSolidBrush(
+                    RGB(0, 180, 220)
+                );
+
+                oldPen = SelectObject(dc, thumbPen);
+                oldBrush = SelectObject(dc, thumbBrush);
+
+                Ellipse(
+                    dc,
+                    thumbX - 9,
+                    centerY - 9,
+                    thumbX + 10,
+                    centerY + 10
+                );
+
+                SelectObject(dc, oldPen);
+                SelectObject(dc, oldBrush);
+
+                DeleteObject(thumbPen);
+                DeleteObject(thumbBrush);
+            }
+        }
+
+        EndPaint(hwnd, &ps);
+        return 0;
+    }
+    }
+
+    return DefWindowProcA(
+        hwnd,
+        message,
+        wParam,
+        lParam
+    );
+}
+
+void layoutControls(HWND hwnd)
+{
+    RECT rect;
+    GetClientRect(hwnd, &rect);
+
+    int width = rect.right;
+    int height = rect.bottom;
+
+    int gpuX = 8;
+    int labelWidth = 180;
+
+    int topSliderWidth = width - 720;
+
+    if (topSliderWidth > 220)
+        topSliderWidth = 220;
+
+    if (topSliderWidth < 80)
+        topSliderWidth = 80;
+
+    int topSliderX = gpuX + labelWidth + 8;
+    int cpuX = topSliderX + topSliderWidth + 8;
+    int statusX = cpuX + labelWidth + 8;
+
+    int autoX = width - 250;
+    int partialX = width - 150;
+
+    int statusWidth = autoX - statusX - 8;
+
+    if (statusWidth < 40)
+        statusWidth = 40;
+
+    int controlTop = height - 82;
+    int bottomSliderX = 205;
+    int bottomSliderWidth = width - bottomSliderX - 20;
+
+    if (bottomSliderWidth < 80)
+        bottomSliderWidth = 80;
+
+    if (gpuShareLabel)
+    {
+        SetWindowPos(
+            gpuShareLabel,
+            nullptr,
+            gpuX,
+            5,
+            labelWidth,
+            25,
+            SWP_NOZORDER
+        );
+    }
+
+    if (cpuShareSlider)
+    {
+        SetWindowPos(
+            cpuShareSlider,
+            nullptr,
+            topSliderX,
+            5,
+            topSliderWidth,
+            25,
+            SWP_NOZORDER
+        );
+    }
+
+    if (cpuShareLabel)
+    {
+        SetWindowPos(
+            cpuShareLabel,
+            nullptr,
+            cpuX,
+            5,
+            labelWidth,
+            25,
+            SWP_NOZORDER
+        );
+    }
+
+    if (statusLabel)
+    {
+        SetWindowPos(
+            statusLabel,
+            nullptr,
+            statusX,
+            5,
+            statusWidth,
+            25,
+            SWP_NOZORDER
+        );
+    }
+
+    if (autoButton)
+    {
+        SetWindowPos(
+            autoButton,
+            nullptr,
+            autoX,
+            3,
+            94,
+            29,
+            SWP_NOZORDER
+        );
+    }
+
+    if (partialButton)
+    {
+        SetWindowPos(
+            partialButton,
+            nullptr,
+            partialX,
+            3,
+            142,
+            29,
+            SWP_NOZORDER
+        );
+    }
+
+    if (iterationLabel)
+    {
+        SetWindowPos(
+            iterationLabel,
+            nullptr,
+            15,
+            controlTop + 1,
+            180,
+            28,
+            SWP_NOZORDER
+        );
+    }
+
+    if (iterationSlider)
+    {
+        SetWindowPos(
+            iterationSlider,
+            nullptr,
+            bottomSliderX,
+            controlTop + 3,
+            bottomSliderWidth,
+            24,
+            SWP_NOZORDER
+        );
+    }
+
+    if (resolutionLabel)
+    {
+        SetWindowPos(
+            resolutionLabel,
+            nullptr,
+            15,
+            controlTop + 39,
+            180,
+            28,
+            SWP_NOZORDER
+        );
+    }
+
+    if (resolutionSlider)
+    {
+        SetWindowPos(
+            resolutionSlider,
+            nullptr,
+            bottomSliderX,
+            controlTop + 41,
+            bottomSliderWidth,
+            24,
+            SWP_NOZORDER
+        );
+    }
+}
+
+void enterFullscreen()
+{
+    if (isFullscreen)
+        return;
+
+    windowedStyle =
+        GetWindowLongPtrA(windowHandle, GWL_STYLE);
+
+    windowedExStyle =
+        GetWindowLongPtrA(windowHandle, GWL_EXSTYLE);
+
+    windowedPlacement.length =
+        sizeof(WINDOWPLACEMENT);
+
+    GetWindowPlacement(
+        windowHandle,
+        &windowedPlacement
+    );
+
+    HMONITOR monitor = MonitorFromWindow(
+        windowHandle,
+        MONITOR_DEFAULTTONEAREST
+    );
+
+    MONITORINFO monitorInfo = {};
+    monitorInfo.cbSize = sizeof(MONITORINFO);
+
+    if (!GetMonitorInfoA(monitor, &monitorInfo))
+        return;
+
+    LONG_PTR newStyle = windowedStyle;
+
+    newStyle &= ~(
+        WS_CAPTION |
+        WS_THICKFRAME |
+        WS_MINIMIZE |
+        WS_MAXIMIZE |
+        WS_SYSMENU
+    );
+
+    newStyle |= WS_POPUP | WS_VISIBLE;
+
+    LONG_PTR newExStyle = windowedExStyle;
+
+    newExStyle &= ~(
+        WS_EX_DLGMODALFRAME |
+        WS_EX_WINDOWEDGE |
+        WS_EX_CLIENTEDGE |
+        WS_EX_STATICEDGE
+    );
+
+    SetWindowLongPtrA(
+        windowHandle,
+        GWL_STYLE,
+        newStyle
+    );
+
+    SetWindowLongPtrA(
+        windowHandle,
+        GWL_EXSTYLE,
+        newExStyle
+    );
+
+    SetWindowPos(
+        windowHandle,
+        HWND_TOP,
+        monitorInfo.rcMonitor.left,
+        monitorInfo.rcMonitor.top,
+        monitorInfo.rcMonitor.right - monitorInfo.rcMonitor.left,
+        monitorInfo.rcMonitor.bottom - monitorInfo.rcMonitor.top,
+        SWP_NOZORDER |
+        SWP_NOACTIVATE |
+        SWP_FRAMECHANGED
+    );
+
+    ShowWindow(gpuShareLabel, SW_HIDE);
+    ShowWindow(cpuShareLabel, SW_HIDE);
+    ShowWindow(cpuShareSlider, SW_HIDE);
+    ShowWindow(statusLabel, SW_HIDE);
+    ShowWindow(iterationLabel, SW_HIDE);
+    ShowWindow(resolutionLabel, SW_HIDE);
+    ShowWindow(iterationSlider, SW_HIDE);
+    ShowWindow(resolutionSlider, SW_HIDE);
+    ShowWindow(autoButton, SW_HIDE);
+    ShowWindow(partialButton, SW_HIDE);
+
+    isFullscreen = true;
+
+    InvalidateRect(windowHandle, nullptr, FALSE);
+}
+
+void exitFullscreen()
+{
+    if (!isFullscreen)
+        return;
+
+    SetWindowLongPtrA(
+        windowHandle,
+        GWL_STYLE,
+        windowedStyle
+    );
+
+    SetWindowLongPtrA(
+        windowHandle,
+        GWL_EXSTYLE,
+        windowedExStyle
+    );
+
+    SetWindowPos(
+        windowHandle,
+        nullptr,
+        0,
+        0,
+        0,
+        0,
+        SWP_NOZORDER |
+        SWP_NOACTIVATE |
+        SWP_FRAMECHANGED |
+        SWP_NOMOVE |
+        SWP_NOSIZE
+    );
+
+    SetWindowPlacement(
+        windowHandle,
+        &windowedPlacement
+    );
+
+    ShowWindow(gpuShareLabel, SW_SHOW);
+    ShowWindow(cpuShareLabel, SW_SHOW);
+    ShowWindow(cpuShareSlider, SW_SHOW);
+    ShowWindow(statusLabel, SW_SHOW);
+    ShowWindow(iterationLabel, SW_SHOW);
+    ShowWindow(resolutionLabel, SW_SHOW);
+    ShowWindow(iterationSlider, SW_SHOW);
+    ShowWindow(resolutionSlider, SW_SHOW);
+    ShowWindow(autoButton, SW_SHOW);
+    ShowWindow(partialButton, SW_SHOW);
+
+    isFullscreen = false;
+
+    layoutControls(windowHandle);
+    InvalidateRect(windowHandle, nullptr, FALSE);
+}
+
+void toggleFullscreen()
+{
+    if (isFullscreen)
+        exitFullscreen();
+    else
+        enterFullscreen();
+}
+
+void updateCamera(double deltaTime, bool windowActive)
+{
+    if (!windowActive)
+    {
+        panVelocityX = 0.0;
+        panVelocityY = 0.0;
+        zoomVelocity = 0.0;
+        return;
+    }
+
+    double zoomInput = 0.0;
+
+    if (GetAsyncKeyState(VK_UP) & 0x8000)
+        zoomInput += 1.0;
+
+    if (GetAsyncKeyState(VK_DOWN) & 0x8000)
+        zoomInput -= 1.0;
+
+    double targetZoomVelocity =
+        zoomInput * ZOOM_MAX_RATE;
+
+    if (zoomInput != 0.0)
+    {
+        double zoomDiff =
+            targetZoomVelocity - zoomVelocity;
+
+        double maxZoomDelta =
+            ZOOM_ACCELERATION * deltaTime;
+
+        if (zoomDiff > maxZoomDelta)
+            zoomDiff = maxZoomDelta;
+
+        if (zoomDiff < -maxZoomDelta)
+            zoomDiff = -maxZoomDelta;
+
+        zoomVelocity += zoomDiff;
+    }
+    else
+    {
+        zoomVelocity *= exp(-ZOOM_DAMPING * deltaTime);
+
+        if (fabs(zoomVelocity) < 0.001)
+            zoomVelocity = 0.0;
+    }
+
+    zoom *= exp(zoomVelocity * deltaTime);
+
+    double inputX = 0.0;
+    double inputY = 0.0;
+
+    if (GetAsyncKeyState('A') & 0x8000)
+        inputX -= 1.0;
+
+    if (GetAsyncKeyState('D') & 0x8000)
+        inputX += 1.0;
+
+    if (GetAsyncKeyState('W') & 0x8000)
+        inputY += 1.0;
+
+    if (GetAsyncKeyState('S') & 0x8000)
+        inputY -= 1.0;
+
+    double inputLength =
+        sqrt(inputX * inputX + inputY * inputY);
+
+    if (inputLength > 0.0)
+    {
+        inputX /= inputLength;
+        inputY /= inputLength;
+    }
+
+    double targetVelocityX =
+        inputX * PAN_SPEED;
+
+    double targetVelocityY =
+        inputY * PAN_SPEED;
+
+    double smoothing =
+        1.0 - exp(-PAN_SMOOTHING_RATE * deltaTime);
+
+    panVelocityX +=
+        (targetVelocityX - panVelocityX) * smoothing;
+
+    panVelocityY +=
+        (targetVelocityY - panVelocityY) * smoothing;
+
+    double movementScale = 3.5 / zoom;
+
+    centerX = ddAdd(
+        centerX,
+        ddFromDouble(
+            panVelocityX * movementScale * deltaTime
+        )
+    );
+
+    centerY = ddAdd(
+        centerY,
+        ddFromDouble(
+            panVelocityY * movementScale * deltaTime
+        )
+    );
+
+    if (zoom < 0.25)
+    {
+        zoom = 0.25;
+        zoomVelocity = 0.0;
+    }
+
+    if (zoom > ZOOM_SAFETY_LIMIT)
+    {
+        zoom = ZOOM_SAFETY_LIMIT;
+        zoomVelocity = 0.0;
+    }
+}
+
+CpuWorkerPool* globalCpuPool = nullptr;
+
+bool cpuBusy = false;
+bool gpuBusy = false;
+
+bool cpuJobPartial = false;
+bool gpuJobPartial = false;
+
+bool syncFrameActive = false;
+bool cpuSyncReady = false;
+bool gpuSyncReady = false;
+
+RenderConfig cpuJobConfig = {};
+RenderConfig gpuJobConfig = {};
+RenderConfig syncFrameConfig = {};
+
+std::chrono::steady_clock::time_point cpuJobStartTime;
+std::chrono::steady_clock::time_point gpuJobStartTime;
+
+cudaStream_t renderStream = nullptr;
+cudaEvent_t gpuDoneEvent = nullptr;
+
+bool startCpuJob(
+    CpuWorkerPool& cpuPool,
+    const RenderConfig& config,
+    bool partial
+)
+{
+    if (config.cpuBlockRows <= 0)
+        return true;
+
+    if (cpuBusy)
+        return false;
+
+    cpuJobConfig = config;
+    cpuJobPartial = partial;
+    cpuJobStartTime = std::chrono::steady_clock::now();
+
+    uchar4* output = cpuPixels.data();
+
+    cpuPool.dispatch(
+        config.cpuStartBlockRow,
+        config.totalBlockRows,
+        [output, config](int blockRow)
+        {
+            renderCpuBlockRow(
+                output,
+                config,
+                blockRow
+            );
+        }
+    );
+
+    cpuBusy = true;
+
+    return true;
+}
+
+bool startGpuJob(
+    const RenderConfig& config,
+    bool partial
+)
+{
+    if (config.gpuBlockRows <= 0)
+        return true;
+
+    if (gpuBusy)
+        return false;
+
+    gpuJobConfig = config;
+    gpuJobPartial = partial;
+    gpuJobStartTime = std::chrono::steady_clock::now();
+
+    dim3 block(16, 16);
+
+    dim3 grid(
+        (config.blockColumns + 15) / 16,
+        (config.gpuBlockRows + 15) / 16
+    );
+
+    mandelbrotKernel<<<grid, block, 0, renderStream>>>(
+        devicePixels,
+        config.width,
+        config.height,
+        config.blockSize,
+        config.blockColumns,
+        0,
+        config.gpuBlockRows,
+        config.cx,
+        config.cy,
+        config.zoomValue,
+        config.iterations,
+        config.highPrecision
+    );
+
+    if (!checkCuda(cudaGetLastError()))
+        return false;
+
+    size_t gpuBytes =
+        (size_t)config.gpuPixelRows *
+        config.width *
+        sizeof(uchar4);
+
+    if (!checkCuda(cudaMemcpyAsync(
+        gpuHostPixels,
+        devicePixels,
+        gpuBytes,
+        cudaMemcpyDeviceToHost,
+        renderStream)))
+        return false;
+
+    if (!checkCuda(cudaEventRecord(
+        gpuDoneEvent,
+        renderStream)))
+        return false;
+
+    gpuBusy = true;
+
+    return true;
+}
+
+void finishCpuJob()
+{
+    if (!cpuBusy || !globalCpuPool->isDone())
+        return;
+
+    cpuBusy = false;
+
+    auto finishTime = std::chrono::steady_clock::now();
+
+    double milliseconds =
+        std::chrono::duration<double, std::milli>(
+            finishTime - cpuJobStartTime
+        ).count();
+
+    recordCpuRate(
+        cpuJobConfig.cpuBlockRows,
+        milliseconds
+    );
+
+    updateAutomaticBalance();
+
+    if (cpuJobPartial)
+    {
+        publishRegion(
+            cpuPixels.data(),
+            cpuJobConfig.cpuPixelStart,
+            cpuJobConfig.cpuPixelEnd,
+            cpuJobConfig
+        );
+    }
+    else
+    {
+        cpuSyncReady = true;
+    }
+}
+
+bool finishGpuJob()
+{
+    if (!gpuBusy)
+        return true;
+
+    cudaError_t result = cudaEventQuery(gpuDoneEvent);
+
+    if (result == cudaErrorNotReady)
+        return true;
+
+    if (result != cudaSuccess)
+    {
+        checkCuda(result);
+        return false;
+    }
+
+    gpuBusy = false;
+
+    auto finishTime = std::chrono::steady_clock::now();
+
+    double milliseconds =
+        std::chrono::duration<double, std::milli>(
+            finishTime - gpuJobStartTime
+        ).count();
+
+    recordGpuRate(
+        gpuJobConfig.gpuBlockRows,
+        milliseconds
+    );
+
+    updateAutomaticBalance();
+
+    if (gpuJobPartial)
+    {
+        publishRegion(
+            gpuHostPixels,
+            0,
+            gpuJobConfig.gpuPixelRows,
+            gpuJobConfig
+        );
+    }
+    else
+    {
+        gpuSyncReady = true;
+    }
+
+    return true;
+}
+
+void finishSynchronousFrame()
+{
+    if (!syncFrameActive)
+        return;
+
+    if (!cpuSyncReady || !gpuSyncReady)
+        return;
+
+    publishFullFrame(syncFrameConfig);
+
+    syncFrameActive = false;
+}
+
+void startSynchronousFrame(
+    CpuWorkerPool& cpuPool,
+    const RenderConfig& config
+)
+{
+    syncFrameConfig = config;
+
+    cpuSyncReady = config.cpuBlockRows <= 0;
+    gpuSyncReady = config.gpuBlockRows <= 0;
+
+    syncFrameActive = true;
+
+    if (config.cpuBlockRows > 0)
+    {
+        if (!startCpuJob(cpuPool, config, false))
+            syncFrameActive = false;
+    }
+
+    if (config.gpuBlockRows > 0)
+    {
+        if (!startGpuJob(config, false))
+            syncFrameActive = false;
+    }
+
+    finishSynchronousFrame();
+}
+
+LRESULT CALLBACK WindowProcedure(
+    HWND hwnd,
+    UINT message,
+    WPARAM wParam,
+    LPARAM lParam
+)
+{
+    switch (message)
+    {
+    case WM_SLIDER_CHANGED:
+        if (wParam == ID_ITERATIONS)
+            maxIterations = (int)lParam;
+
+        if (wParam == ID_RESOLUTION)
+            resolutionBlockSize = (int)lParam;
+
+        if (wParam == ID_CPU_SHARE && !autoBalanceEnabled)
+            requestCpuShare((int)lParam);
+
+        updateLabels();
+        return 0;
+
+    case WM_COMMAND:
+        if (HIWORD(wParam) == BN_CLICKED)
+        {
+            int controlId = LOWORD(wParam);
+
+            if (controlId == ID_AUTO_BUTTON)
+            {
+                autoBalanceEnabled = !autoBalanceEnabled;
+
+                EnableWindow(
+                    cpuShareSlider,
+                    autoBalanceEnabled ? FALSE : TRUE
+                );
+
+                if (autoBalanceEnabled)
+                {
+                    lastAutoCpuVersion = cpuRateVersion;
+                    lastAutoGpuVersion = gpuRateVersion;
+
+                    if (appliedCpuShare == 0 ||
+                        appliedCpuShare == 100)
+                    {
+                        requestCpuShare(25);
+                    }
+                }
+
+                updateButtonTexts();
+                updateLabels();
+
+                SetFocus(hwnd);
+                return 0;
+            }
+
+            if (controlId == ID_PARTIAL_BUTTON)
+            {
+                partialUpdatesEnabled =
+                    !partialUpdatesEnabled;
+
+                updateButtonTexts();
+
+                SetFocus(hwnd);
+                return 0;
+            }
+        }
+
+        break;
+
+    case WM_SIZE:
+        if (statusLabel)
+            layoutControls(hwnd);
+
+        return 0;
+
+    case WM_CTLCOLORSTATIC:
+    {
+        HDC dc = (HDC)wParam;
+
+        SetTextColor(dc, RGB(220, 235, 245));
+        SetBkMode(dc, TRANSPARENT);
+
+        return (LRESULT)GetStockObject(BLACK_BRUSH);
+    }
+
+    case WM_ERASEBKGND:
+        return 1;
+
+    case WM_PAINT:
+    {
+        PAINTSTRUCT ps;
+        HDC dc = BeginPaint(hwnd, &ps);
+
+        RECT rect;
+        GetClientRect(hwnd, &rect);
+
+        if (!displayImageAvailable ||
+            displayWidth <= 0 ||
+            displayHeight <= 0)
+        {
+            FillRect(
+                dc,
+                &ps.rcPaint,
+                (HBRUSH)GetStockObject(BLACK_BRUSH)
+            );
+        }
+        else
+        {
+            int imageTop = isFullscreen ? 0 : IMAGE_TOP;
+
+            int controlsHeight =
+                isFullscreen ? 0 : CONTROL_AREA_HEIGHT;
+
+            int imageHeight =
+                rect.bottom - imageTop - controlsHeight;
+
+            if (imageHeight < 1)
+                imageHeight = 1;
+
+            if (ps.rcPaint.top < imageTop)
+            {
+                RECT topRect = ps.rcPaint;
+
+                if (topRect.bottom > imageTop)
+                    topRect.bottom = imageTop;
+
+                if (topRect.bottom > topRect.top)
+                {
+                    FillRect(
+                        dc,
+                        &topRect,
+                        (HBRUSH)GetStockObject(BLACK_BRUSH)
+                    );
+                }
+            }
+
+            int imageBottom = imageTop + imageHeight;
+
+            if (ps.rcPaint.bottom > imageBottom)
+            {
+                RECT bottomRect = ps.rcPaint;
+
+                if (bottomRect.top < imageBottom)
+                    bottomRect.top = imageBottom;
+
+                if (bottomRect.bottom > bottomRect.top)
+                {
+                    FillRect(
+                        dc,
+                        &bottomRect,
+                        (HBRUSH)GetStockObject(BLACK_BRUSH)
+                    );
+                }
+            }
+
+            SetStretchBltMode(dc, COLORONCOLOR);
+
+            StretchDIBits(
+                dc,
+                0,
+                imageTop,
+                rect.right,
+                imageHeight,
+                0,
+                0,
+                displayWidth,
+                displayHeight,
+                displayPixels.data(),
+                &bitmapInfo,
+                DIB_RGB_COLORS,
+                SRCCOPY
+            );
+        }
+
+        EndPaint(hwnd, &ps);
+        return 0;
+    }
+
+    case WM_DESTROY:
+        PostQuitMessage(0);
+        return 0;
+    }
+
+    return DefWindowProcA(
+        hwnd,
+        message,
+        wParam,
+        lParam
+    );
+}
+
+int main()
+{
+    if (!checkCuda(cudaSetDevice(0)))
+        return 1;
+
+    cudaDeviceProp deviceProperties = {};
+
+    if (!checkCuda(cudaGetDeviceProperties(
+        &deviceProperties,
+        0)))
+        return 1;
+
+    size_t maximumPixels =
+        (size_t)MAX_WIDTH * MAX_HEIGHT;
+
+    try
+    {
+        cpuPixels.resize(maximumPixels);
+        displayPixels.resize(maximumPixels);
+    }
+    catch (...)
+    {
+        MessageBoxA(
+            nullptr,
+            "Bildspeicher konnte nicht reserviert werden.",
+            "Speicherfehler",
+            MB_ICONERROR
+        );
+
+        return 1;
+    }
+
+    if (!checkCuda(cudaMalloc(
+        (void**)&devicePixels,
+        maximumPixels * sizeof(uchar4))))
+        return 1;
+
+    if (!checkCuda(cudaHostAlloc(
+        (void**)&gpuHostPixels,
+        maximumPixels * sizeof(uchar4),
+        cudaHostAllocDefault)))
+    {
+        cudaFree(devicePixels);
+        return 1;
+    }
+
+    if (!checkCuda(cudaStreamCreateWithFlags(
+        &renderStream,
+        cudaStreamNonBlocking)))
+    {
+        cudaFree(devicePixels);
+        cudaFreeHost(gpuHostPixels);
+        return 1;
+    }
+
+    if (!checkCuda(cudaEventCreate(&gpuDoneEvent)))
+    {
+        cudaStreamDestroy(renderStream);
+        cudaFree(devicePixels);
+        cudaFreeHost(gpuHostPixels);
+        return 1;
+    }
+
+    initializeNvml();
+
+    HINSTANCE instance = GetModuleHandleA(nullptr);
+
+    WNDCLASSEXA sliderClass = {};
+    sliderClass.cbSize = sizeof(WNDCLASSEXA);
+    sliderClass.lpfnWndProc = SliderProcedure;
+    sliderClass.hInstance = instance;
+    sliderClass.lpszClassName = "MandelbrotSlider";
+    sliderClass.hCursor = LoadCursorA(nullptr, IDC_HAND);
+    sliderClass.hbrBackground =
+        (HBRUSH)GetStockObject(BLACK_BRUSH);
+    sliderClass.style = CS_HREDRAW | CS_VREDRAW;
+
+    if (!RegisterClassExA(&sliderClass))
+    {
+        MessageBoxA(
+            nullptr,
+            "Schieberegler konnten nicht erstellt werden.",
+            "Fehler",
+            MB_ICONERROR
+        );
+
+        cudaEventDestroy(gpuDoneEvent);
+        cudaStreamDestroy(renderStream);
+        cudaFree(devicePixels);
+        cudaFreeHost(gpuHostPixels);
+
+        if (nvmlLibrary)
+            FreeLibrary(nvmlLibrary);
+
+        return 1;
+    }
+
+    WNDCLASSEXA windowClass = {};
+    windowClass.cbSize = sizeof(WNDCLASSEXA);
+    windowClass.lpfnWndProc = WindowProcedure;
+    windowClass.hInstance = instance;
+    windowClass.lpszClassName = "CudaMandelbrotWindow";
+    windowClass.hCursor = LoadCursorA(nullptr, IDC_ARROW);
+    windowClass.hbrBackground =
+        (HBRUSH)GetStockObject(BLACK_BRUSH);
+
+    if (!RegisterClassExA(&windowClass))
+    {
+        MessageBoxA(
+            nullptr,
+            "Fensterklasse konnte nicht erstellt werden.",
+            "Fehler",
+            MB_ICONERROR
+        );
+
+        cudaEventDestroy(gpuDoneEvent);
+        cudaStreamDestroy(renderStream);
+        cudaFree(devicePixels);
+        cudaFreeHost(gpuHostPixels);
+
+        if (nvmlLibrary)
+            FreeLibrary(nvmlLibrary);
+
+        return 1;
+    }
+
+    RECT rectangle = { 0, 0, 1400, 900 };
+
+    AdjustWindowRect(
+        &rectangle,
+        WS_OVERLAPPEDWINDOW,
+        FALSE
+    );
+
+    windowHandle = CreateWindowExA(
+        0,
+        "CudaMandelbrotWindow",
+        "CUDA Mandelbrot - RTX 3060 Ti",
+        WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
+        CW_USEDEFAULT,
+        CW_USEDEFAULT,
+        rectangle.right - rectangle.left,
+        rectangle.bottom - rectangle.top,
+        nullptr,
+        nullptr,
+        instance,
+        nullptr
+    );
+
+    if (!windowHandle)
+    {
+        cudaEventDestroy(gpuDoneEvent);
+        cudaStreamDestroy(renderStream);
+        cudaFree(devicePixels);
+        cudaFreeHost(gpuHostPixels);
+
+        if (nvmlLibrary)
+            FreeLibrary(nvmlLibrary);
+
+        return 1;
+    }
+
+    uiFont = CreateFontA(
+        -15,
+        0,
+        0,
+        0,
+        FW_NORMAL,
+        FALSE,
+        FALSE,
+        FALSE,
+        DEFAULT_CHARSET,
+        OUT_DEFAULT_PRECIS,
+        CLIP_DEFAULT_PRECIS,
+        CLEARTYPE_QUALITY,
+        DEFAULT_PITCH | FF_DONTCARE,
+        "Segoe UI"
+    );
+
+    statusFont = CreateFontA(
+        -15,
+        0,
+        0,
+        0,
+        FW_SEMIBOLD,
+        FALSE,
+        FALSE,
+        FALSE,
+        DEFAULT_CHARSET,
+        OUT_DEFAULT_PRECIS,
+        CLIP_DEFAULT_PRECIS,
+        CLEARTYPE_QUALITY,
+        DEFAULT_PITCH | FF_DONTCARE,
+        "Segoe UI"
+    );
+
+    gpuShareLabel = CreateWindowExA(
+        0,
+        "STATIC",
+        "",
+        WS_CHILD | WS_VISIBLE | SS_LEFT | SS_CENTERIMAGE,
+        0, 0, 100, 25,
+        windowHandle,
+        nullptr,
+        instance,
+        nullptr
+    );
+
+    cpuShareLabel = CreateWindowExA(
+        0,
+        "STATIC",
+        "",
+        WS_CHILD | WS_VISIBLE | SS_LEFT | SS_CENTERIMAGE,
+        0, 0, 100, 25,
+        windowHandle,
+        nullptr,
+        instance,
+        nullptr
+    );
+
+    statusLabel = CreateWindowExA(
+        0,
+        "STATIC",
+        "",
+        WS_CHILD | WS_VISIBLE | SS_LEFT | SS_CENTERIMAGE,
+        0, 0, 100, 25,
+        windowHandle,
+        nullptr,
+        instance,
+        nullptr
+    );
+
+    iterationLabel = CreateWindowExA(
+        0,
+        "STATIC",
+        "",
+        WS_CHILD | WS_VISIBLE | SS_LEFT | SS_CENTERIMAGE,
+        0, 0, 100, 25,
+        windowHandle,
+        nullptr,
+        instance,
+        nullptr
+    );
+
+    resolutionLabel = CreateWindowExA(
+        0,
+        "STATIC",
+        "",
+        WS_CHILD | WS_VISIBLE | SS_LEFT | SS_CENTERIMAGE,
+        0, 0, 100, 25,
+        windowHandle,
+        nullptr,
+        instance,
+        nullptr
+    );
+
+    cpuShareSlider = CreateWindowExA(
+        0,
+        "MandelbrotSlider",
+        "",
+        WS_CHILD | WS_VISIBLE,
+        0, 0, 100, 25,
+        windowHandle,
+        nullptr,
+        instance,
+        &cpuShareSliderData
+    );
+
+    iterationSlider = CreateWindowExA(
+        0,
+        "MandelbrotSlider",
+        "",
+        WS_CHILD | WS_VISIBLE,
+        0, 0, 100, 24,
+        windowHandle,
+        nullptr,
+        instance,
+        &iterationSliderData
+    );
+
+    resolutionSlider = CreateWindowExA(
+        0,
+        "MandelbrotSlider",
+        "",
+        WS_CHILD | WS_VISIBLE,
+        0, 0, 100, 24,
+        windowHandle,
+        nullptr,
+        instance,
+        &resolutionSliderData
+    );
+
+    autoButton = CreateWindowExA(
+        0,
+        "BUTTON",
+        "AUTO: AUS",
+        WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_TABSTOP,
+        0, 0, 94, 29,
+        windowHandle,
+        (HMENU)(INT_PTR)ID_AUTO_BUTTON,
+        instance,
+        nullptr
+    );
+
+    partialButton = CreateWindowExA(
+        0,
+        "BUTTON",
+        "TEILUPDATE: AUS",
+        WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_TABSTOP,
+        0, 0, 142, 29,
+        windowHandle,
+        (HMENU)(INT_PTR)ID_PARTIAL_BUTTON,
+        instance,
+        nullptr
+    );
+
+    if (!gpuShareLabel ||
+        !cpuShareLabel ||
+        !statusLabel ||
+        !iterationLabel ||
+        !resolutionLabel ||
+        !cpuShareSlider ||
+        !iterationSlider ||
+        !resolutionSlider ||
+        !autoButton ||
+        !partialButton)
+    {
+        MessageBoxA(
+            nullptr,
+            "Die Benutzeroberfläche konnte nicht erstellt werden.",
+            "Fehler",
+            MB_ICONERROR
+        );
+
+        DestroyWindow(windowHandle);
+
+        cudaEventDestroy(gpuDoneEvent);
+        cudaStreamDestroy(renderStream);
+        cudaFree(devicePixels);
+        cudaFreeHost(gpuHostPixels);
+
+        if (nvmlAvailable && nvmlShutdownFunction)
+            nvmlShutdownFunction();
+
+        if (nvmlLibrary)
+            FreeLibrary(nvmlLibrary);
+
+        if (uiFont)
+            DeleteObject(uiFont);
+
+        if (statusFont)
+            DeleteObject(statusFont);
+
+        return 1;
+    }
+
+    SendMessageA(gpuShareLabel, WM_SETFONT, (WPARAM)uiFont, TRUE);
+    SendMessageA(cpuShareLabel, WM_SETFONT, (WPARAM)uiFont, TRUE);
+    SendMessageA(statusLabel, WM_SETFONT, (WPARAM)statusFont, TRUE);
+    SendMessageA(iterationLabel, WM_SETFONT, (WPARAM)uiFont, TRUE);
+    SendMessageA(resolutionLabel, WM_SETFONT, (WPARAM)uiFont, TRUE);
+    SendMessageA(autoButton, WM_SETFONT, (WPARAM)uiFont, TRUE);
+    SendMessageA(partialButton, WM_SETFONT, (WPARAM)uiFont, TRUE);
+
+    updateLabels();
+    layoutControls(windowHandle);
+
+    ShowWindow(windowHandle, SW_SHOWMAXIMIZED);
+    UpdateWindow(windowHandle);
+
+    bitmapInfo.bmiHeader.biSize =
+        sizeof(BITMAPINFOHEADER);
+
+    bitmapInfo.bmiHeader.biPlanes = 1;
+    bitmapInfo.bmiHeader.biBitCount = 32;
+    bitmapInfo.bmiHeader.biCompression = BI_RGB;
+
+    CpuWorkerPool cpuPool;
+    globalCpuPool = &cpuPool;
+
+    ProcessCpuMeter cpuMeter;
+
+    applyLayout(makeRenderConfig(appliedCpuShare));
+
+    MSG message = {};
+
+    auto previousTime =
+        std::chrono::steady_clock::now();
+
+    auto previousStatusTime = previousTime;
+
+    bool running = true;
+    bool cudaFailure = false;
+
+    while (running)
+    {
+        while (PeekMessageA(
+            &message,
+            nullptr,
+            0,
+            0,
+            PM_REMOVE))
+        {
+            if (message.message == WM_QUIT)
+            {
+                running = false;
+                break;
+            }
+
+            TranslateMessage(&message);
+            DispatchMessageA(&message);
+        }
+
+        if (!running)
+            break;
+
+        if (IsIconic(windowHandle))
+        {
+            panVelocityX = 0.0;
+            panVelocityY = 0.0;
+            zoomVelocity = 0.0;
+
+            fKeyWasDown = false;
+            escKeyWasDown = false;
+
+            Sleep(30);
+            continue;
+        }
+
+        auto currentTime =
+            std::chrono::steady_clock::now();
+
+        double deltaTime =
+            std::chrono::duration<double>(
+                currentTime - previousTime
+            ).count();
+
+        previousTime = currentTime;
+
+        if (deltaTime > 0.05)
+            deltaTime = 0.05;
+
+        if (deltaTime < 0.0)
+            deltaTime = 0.0;
+
+        bool windowActive =
+            GetForegroundWindow() == windowHandle;
+
+        bool fKeyIsDown =
+            windowActive &&
+            (GetAsyncKeyState('F') & 0x8000) != 0;
+
+        if (fKeyIsDown && !fKeyWasDown)
+            toggleFullscreen();
+
+        fKeyWasDown = fKeyIsDown;
+
+        bool escKeyIsDown =
+            windowActive &&
+            (GetAsyncKeyState(VK_ESCAPE) & 0x8000) != 0;
+
+        if (escKeyIsDown &&
+            !escKeyWasDown &&
+            isFullscreen)
+        {
+            exitFullscreen();
+        }
+
+        escKeyWasDown = escKeyIsDown;
+
+        updateCamera(deltaTime, windowActive);
+
+        if (cpuBusy && cpuPool.isDone())
+            finishCpuJob();
+
+        if (gpuBusy)
+        {
+            if (!finishGpuJob())
+            {
+                cudaFailure = true;
+                running = false;
+                break;
+            }
+        }
+
+        finishSynchronousFrame();
+
+        RenderConfig currentConfig =
+            makeRenderConfig(
+                shareChangePending
+                    ? pendingCpuShare
+                    : appliedCpuShare
+            );
+
+        if (!cpuBusy &&
+            !gpuBusy &&
+            !syncFrameActive &&
+            shareChangePending)
+        {
+            appliedCpuShare = pendingCpuShare;
+            shareChangePending = false;
+
+            cpuShareSliderData.value = appliedCpuShare;
+
+            currentConfig =
+                makeRenderConfig(appliedCpuShare);
+        }
+
+        if (!partialUpdatesEnabled)
+        {
+            if (!syncFrameActive &&
+                !cpuBusy &&
+                !gpuBusy)
+            {
+                currentConfig =
+                    makeRenderConfig(appliedCpuShare);
+
+                if (!layoutMatchesActive(currentConfig))
+                    applyLayout(currentConfig);
+
+                startSynchronousFrame(
+                    cpuPool,
+                    currentConfig
+                );
+            }
+        }
+        else
+        {
+            if (!syncFrameActive &&
+                !cpuBusy &&
+                !gpuBusy)
+            {
+                currentConfig =
+                    makeRenderConfig(appliedCpuShare);
+
+                if (!layoutMatchesActive(currentConfig))
+                    applyLayout(currentConfig);
+            }
+
+            if (!syncFrameActive &&
+                !shareChangePending &&
+                layoutMatchesActive(
+                    makeRenderConfig(appliedCpuShare)
+                ))
+            {
+                currentConfig =
+                    makeRenderConfig(appliedCpuShare);
+
+                if (!cpuBusy &&
+                    currentConfig.cpuBlockRows > 0)
+                {
+                    if (!startCpuJob(
+                        cpuPool,
+                        currentConfig,
+                        true))
+                    {
+                        running = false;
+                        break;
+                    }
+                }
+
+                if (!gpuBusy &&
+                    currentConfig.gpuBlockRows > 0)
+                {
+                    if (!startGpuJob(
+                        currentConfig,
+                        true))
+                    {
+                        cudaFailure = true;
+                        running = false;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (!isFullscreen &&
+            std::chrono::duration<double>(
+                currentTime - previousStatusTime
+            ).count() >= 0.5)
+        {
+            currentGpuUsage = getGpuUsage();
+            currentCpuUsage = cpuMeter.sample();
+
+            updateShareLabels();
+
+            char status[512];
+
+            if (zoom >= DEEP_ZOOM_THRESHOLD)
+            {
+                sprintf_s(
+                    status,
+                    "Zoom: %.3e | %s | Double-Double | CUDA",
+                    zoom,
+                    deviceProperties.name
+                );
+            }
+            else
+            {
+                sprintf_s(
+                    status,
+                    "Zoom: %.2fx | %s | CUDA",
+                    zoom,
+                    deviceProperties.name
+                );
+            }
+
+            SetWindowTextA(statusLabel, status);
+
+            previousStatusTime = currentTime;
+        }
+
+        Sleep(1);
+    }
+
+    if (cpuBusy)
+        cpuPool.wait();
+
+    if (gpuBusy)
+        cudaStreamSynchronize(renderStream);
+
+    if (nvmlAvailable && nvmlShutdownFunction)
+        nvmlShutdownFunction();
+
+    if (nvmlLibrary)
+        FreeLibrary(nvmlLibrary);
+
+    if (uiFont)
+        DeleteObject(uiFont);
+
+    if (statusFont)
+        DeleteObject(statusFont);
+
+    cudaEventDestroy(gpuDoneEvent);
+    cudaStreamDestroy(renderStream);
+
+    cudaFree(devicePixels);
+    cudaFreeHost(gpuHostPixels);
+
+    globalCpuPool = nullptr;
+
+    return cudaFailure ? 1 : 0;
+}
