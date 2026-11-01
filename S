@@ -235,7 +235,7 @@ button:active{filter:brightness(.9)}
       <button id="stop">Stopp</button>
       <button id="copy-console">Konsole kopieren</button>
       <button id="copy-code">Code kopieren</button>
-      <span id="build-tools"><span id="build-version">11</span><button id="virtual-key-toggle" type="button" aria-label="Tastatur ein- oder ausblenden">T</button></span>
+      <span id="build-tools"><span id="build-version">12</span><button id="virtual-key-toggle" type="button" aria-label="Tastatur ein- oder ausblenden">T</button></span>
     </div>
 
     <div id="virtual-keyboard" hidden>
@@ -859,6 +859,25 @@ function getDeclaredNames(source){
   for(const line of lines){
     let match;
 
+    const explicitDeclarations=/\b(?:let|var)\s+([a-z_$][a-z_$]*)\s*=/ig;
+    while((match=explicitDeclarations.exec(line))!==null){
+      names.add(match[1].toLowerCase());
+    }
+
+    const arrayDeclarations=/\barray\s+([a-z_$][a-z_$]*)\s*\[/ig;
+    while((match=arrayDeclarations.exec(line))!==null){
+      names.add(match[1].toLowerCase());
+    }
+
+    const functionDeclarations=/\b(?:function|fn)\s+[a-z_$][a-z_$]*\s*\(([^)]*)\)/ig;
+    while((match=functionDeclarations.exec(line))!==null){
+      const parameters=match[1].split(",");
+      for(const parameter of parameters){
+        const name=parameter.trim().toLowerCase();
+        if(/^[a-z_$][a-z_$]*$/i.test(name)) names.add(name);
+      }
+    }
+
     const spaced = /([a-z_$][a-z_$]*)[ \t]+([-+]?(?:\d+(?:\.\d*)?|\.\d+))/ig;
 
     while((match=spaced.exec(line))!==null){
@@ -866,7 +885,7 @@ function getDeclaredNames(source){
     }
 
     const compactEnd =
-      /(?:^|[;\s])((?:[a-z_$]+0)+)(?=$|[;\s{}]|(?:penon|penoff|pensize|pencolor|color|thickness|penwidth|goto|move|clear|stop|cls|break|print))/ig;
+      /(?:^|[;\s])((?:[a-z_$]+0)+)(?=$|[;\s{}]|(?:penon|penoff|pensize|pencolor|color|thickness|penwidth|goto|move|clear|stop|cls|break|continue|print))/ig;
 
     while((match=compactEnd.exec(line))!==null){
       const declarations = match[1].match(/[a-z_$]+(?=0)/ig) || [];
