@@ -978,18 +978,6 @@ class ProgramParser{
     const remaining = this.rest();
     let match;
 
-    match = remaining.match(/^wait\s*([-+]?(?:\d+(?:\.\d*)?|\.\d+))/i);
-
-    if(match){
-      this.position += match[0].length;
-
-      return {
-        type:"command",
-        command:"wait",
-        args:[Number(match[1])]
-      };
-    }
-
     match = remaining.match(
       /^(?:goto|move)\s*([-+]?(?:\d+(?:\.\d*)?|\.\d+)|[a-z_$][a-z_$]*)\s*,\s*([-+]?(?:\d+(?:\.\d*)?|\.\d+)|[a-z_$][a-z_$]*)/i
     );
@@ -1108,6 +1096,24 @@ class ProgramParser{
     if(label){
       this.position += label[0].length;
       return {type:"empty"};
+    }
+
+    const waitCommand = this.rest().match(
+      /^wait[ \\t]*([-+]?(?:\\d+(?:\\.\\d*)?|\\.\\d+))(?=$|[\\s;{}])/i
+    );
+
+    if(waitCommand){
+      this.position += waitCommand[0].length;
+
+      return {
+        type:"command",
+        command:"wait",
+        args:[Number(waitCommand[1])]
+      };
+    }
+
+    if(/^wait(?:$|[ \\t])/i.test(this.rest())){
+      throw new Error("wait benötigt eine Millisekunden-Zahl, zum Beispiel wait 1000.");
     }
 
     const compactControl = this.parseCompactControlPrefix();
