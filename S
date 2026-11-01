@@ -235,7 +235,7 @@ button:active{filter:brightness(.9)}
       <button id="stop">Stopp</button>
       <button id="copy-console">Konsole kopieren</button>
       <button id="copy-code">Code kopieren</button>
-      <span id="build-tools"><span id="build-version">09</span><button id="virtual-key-toggle" type="button" aria-label="Tastatur ein- oder ausblenden">T</button></span>
+      <span id="build-tools"><span id="build-version">10</span><button id="virtual-key-toggle" type="button" aria-label="Tastatur ein- oder ausblenden">T</button></span>
     </div>
 
     <div id="virtual-keyboard" hidden>
@@ -284,13 +284,16 @@ const consoleElement = document.getElementById("console");
 const consoleInput = document.getElementById("console-input");
 const enterButton = document.getElementById("enter");
 const canvas = document.getElementById("canvas");
-const ctx = canvas.getContext("2d",{willReadFrequently:true});
+const ctx = canvas.getContext("2d");
 const positionLabel = document.getElementById("pos-label");
 
 ctx.imageSmoothingEnabled = false;
 
 let variables = Object.create(null);
 const pressedKeys = new Set();
+const functionDefinitions = Object.create(null);
+const functionScopes = [];
+let functionCallDepth = 0;
 
 function isKeyPressName(name){
   return /^(?:[a-z0-9]|up|down|left|right|plus|minus)press$/i.test(String(name));
@@ -307,6 +310,7 @@ let executionSteps = 0;
 let outputLines = [];
 let shouldClearConsole = false;
 let breakRequested = false;
+let continueRequested = false;
 let loopDepth = 0;
 
 
@@ -422,63 +426,26 @@ function colorForPen(value){
 }
 
 function drawPixelLine(x1,y1,x2,y2,width,color){
-  const a = canvasPoint(x1,y1);
-  const b = canvasPoint(x2,y2);
-  const w = clamp(Math.round(width),1,1000);
-
-  if(w>=1000){
-    ctx.fillStyle = color;
-    ctx.fillRect(0,0,1000,1000);
-    return;
+  const a=canvasPoint(x1,y1);
+  const b=canvasPoint(x2,y2);
+  const w=clamp(Math.round(width),1,1000);
+  ctx.save();
+  ctx.strokeStyle=color;
+  ctx.fillStyle=color;
+  ctx.lineWidth=w;
+  ctx.lineCap="round";
+  ctx.lineJoin="round";
+  if(a.x===b.x&&a.y===b.y){
+    ctx.beginPath();
+    ctx.arc(a.x,a.y,w/2,0,Math.PI*2);
+    ctx.fill();
+  }else{
+    ctx.beginPath();
+    ctx.moveTo(a.x,a.y);
+    ctx.lineTo(b.x,b.y);
+    ctx.stroke();
   }
-
-  const radius = Math.max(0.5,w/2);
-  const radiusSq = radius*radius;
-  const minX = clamp(Math.floor(Math.min(a.x,b.x)-radius-1),0,999);
-  const maxX = clamp(Math.ceil(Math.max(a.x,b.x)+radius+1),0,999);
-  const minY = clamp(Math.floor(Math.min(a.y,b.y)-radius-1),0,999);
-  const maxY = clamp(Math.ceil(Math.max(a.y,b.y)+radius+1),0,999);
-
-  const boxWidth = maxX-minX+1;
-  const boxHeight = maxY-minY+1;
-  const image = ctx.getImageData(minX,minY,boxWidth,boxHeight);
-  const data = image.data;
-
-  const dx = b.x-a.x;
-  const dy = b.y-a.y;
-  const lengthSq = dx*dx+dy*dy;
-  const rgb = hslToRgb(color);
-  const length = Math.sqrt(lengthSq);
-  const extension = length>0 ? radius/length : 0;
-
-  for(let yy=0;yy<boxHeight;yy++){
-    for(let xx=0;xx<boxWidth;xx++){
-      const sx = minX+xx+0.5;
-      const sy = minY+yy+0.5;
-      let t = 0;
-
-      if(lengthSq>0){
-        t = ((sx-a.x)*dx+(sy-a.y)*dy)/lengthSq;
-      }
-
-      if(t < -extension || t > 1+extension) continue;
-
-      const nx = a.x+t*dx;
-      const ny = a.y+t*dy;
-      const rx = sx-nx;
-      const ry = sy-ny;
-
-      if(rx*rx+ry*ry<=radiusSq){
-        const i = (yy*boxWidth+xx)*4;
-        data[i] = rgb.r;
-        data[i+1] = rgb.g;
-        data[i+2] = rgb.b;
-        data[i+3] = 255;
-      }
-    }
-  }
-
-  ctx.putImageData(image,minX,minY);
+  ctx.restore();
 }
 
 function gotoPosition(x,y){
@@ -502,17 +469,9 @@ function gotoPosition(x,y){
 }
 
 function setPenColor(number){
-  let value = Number(number);
-
-  if(value===0){
-    value=100;
-  }
-
-  if(!Number.isFinite(value)||value<1||value>100){
-    throw new Error("Stiftfarbe muss zwischen 1 und 100 liegen.");
-  }
-
-  penColor = value;
+  const input=Number(number);
+  if(!Number.isFinite(input)) throw new Error("Stiftfarbe muss eine endliche Zahl sein.");
+  penColor=((input-1)%100+100)%100+1;
 }
 
 function setPenWidth(number){
@@ -526,31 +485,65 @@ function setPenWidth(number){
 }
 
 function getVariable(name){
-  const key = String(name).toLowerCase();
-
+  const key=String(name).toLowerCase();
   if(key==="x") return px;
   if(key==="y") return py;
   if(isKeyPressName(key)) return pressedKeys.has(key.slice(0,-5))?1:0;
-
-  if(!Object.prototype.hasOwnProperty.call(variables,key)){
-    throw new Error("Variable nicht deklariert: "+key);
+  for(let i=functionScopes.length-1;i>=0;i--){
+    if(Object.prototype.hasOwnProperty.call(functionScopes[i],key)) return functionScopes[i][key];
   }
-
+  if(!Object.prototype.hasOwnProperty.call(variables,key)) throw new Error("Variable nicht deklariert: "+key);
   return variables[key];
 }
 
 function setVariable(name,value){
-  const key = String(name).toLowerCase();
-
-  if(key==="x"||key==="y"||isKeyPressName(key)){
-    throw new Error("Diese Werte sind schreibgeschützt.");
+  const key=String(name).toLowerCase();
+  if(key==="x"||key==="y"||isKeyPressName(key)) throw new Error("Diese Werte sind schreibgeschützt.");
+  for(let i=functionScopes.length-1;i>=0;i--){
+    if(Object.prototype.hasOwnProperty.call(functionScopes[i],key)){
+      functionScopes[i][key]=value;
+      return;
+    }
   }
+  if(!Object.prototype.hasOwnProperty.call(variables,key)) throw new Error("Variable nicht deklariert: "+key);
+  variables[key]=value;
+}
 
-  if(!Object.prototype.hasOwnProperty.call(variables,key)){
-    throw new Error("Variable nicht deklariert: "+key);
+function defineVariable(name,value){
+  const key=String(name).toLowerCase();
+  if(key==="x"||key==="y"||isKeyPressName(key)) throw new Error("Diese Werte sind schreibgeschützt.");
+  if(functionScopes.length) functionScopes[functionScopes.length-1][key]=value;
+  else variables[key]=value;
+}
+
+function getArrayElement(name,index){
+  const array=getVariable(name);
+  const position=Number(index);
+  if(!Array.isArray(array)) throw new Error("Keine Array-Variable: "+name);
+  if(!Number.isInteger(position)||position<0||position>=array.length) throw new Error("Array-Index außerhalb des Bereichs: "+name+"["+index+"]");
+  return array[position];
+}
+
+function setArrayElement(name,index,value,operator="="){
+  const array=getVariable(name);
+  const position=Number(index);
+  if(!Array.isArray(array)) throw new Error("Keine Array-Variable: "+name);
+  if(!Number.isInteger(position)||position<0||position>=array.length) throw new Error("Array-Index außerhalb des Bereichs: "+name+"["+index+"]");
+  const oldValue=array[position];
+  let result=value;
+  if(operator==="+=") result=oldValue+value;
+  if(operator==="-=") result=oldValue-value;
+  if(operator==="*=") result=oldValue*value;
+  if(operator==="/="){
+    if(value===0) throw new Error("Division durch null.");
+    result=oldValue/value;
   }
+  array[position]=result;
+  return result;
+}
 
-  variables[key] = value;
+function parseValue(value){
+  return resolveCompiledToken(compileToken(String(value).trim()));
 }
 
 function parseValue(value){
@@ -574,35 +567,8 @@ function parseValue(value){
 }
 
 function evaluateCondition(condition){
-  const token = String(condition).trim();
-
-  if(/^true$/i.test(token)) return true;
-  if(/^false$/i.test(token)) return false;
-
-  const match = token.match(
-    /^([a-z_$][a-z_$]*)\s*(==|=|!=|>=|<=|>|<)\s*([a-z_$][a-z_$]*|[-+]?(?:\d+(?:\.\d*)?|\.\d+)|(?:sin|cos)\s*\([^()]+\)|true|false)$/i
-  );
-
-  if(!match){
-    throw new Error("Ungültige Bedingung: "+condition);
-  }
-
-  const left = getVariable(match[1].toLowerCase());
-  const right = parseValue(match[3]);
-  const operator = match[2];
-
-  switch(operator){
-    case "=":
-    case "==": return left===right;
-    case "!=": return left!==right;
-    case ">": return left>right;
-    case "<": return left<right;
-    case ">=": return left>=right;
-    case "<=": return left<=right;
-    default: return false;
-  }
+  return evaluateBooleanExpression(condition);
 }
-
 
 function compileToken(raw){
   const token=String(raw).trim();
@@ -614,7 +580,7 @@ function compileToken(raw){
 }
 
 function evaluateMathExpression(source){
-  const tokens=String(source).match(/(?:\d+(?:\.\d*)?|\.\d+)|[a-z_$][a-z_$]*|[()+\-*/^]/gi)||[];
+  const tokens=String(source).match(/(?:\d+(?:\.\d*)?|\.\d+)|[a-z_$][a-z0-9_$]*|[()+\-*/^\[\],]/gi)||[];
   const compact=String(source).replace(/\s+/g,"");
   if(tokens.join("").toLowerCase()!==compact.toLowerCase()) throw new Error("Ungültiger mathematischer Ausdruck: "+source);
   let index=0;
@@ -628,21 +594,38 @@ function evaluateMathExpression(source){
       if(tokens[index++]!==")") throw new Error("Schließende Klammer fehlt.");
       return value;
     }
-    if(/^\d/.test(token)||/^\./.test(token)) return Number(token);
-    if(/^(sin|cos)$/i.test(token)&&tokens[index]==="("){
+    if(/^(?:\d|\.)/.test(token)) return Number(token);
+    const name=token.toLowerCase();
+    if(tokens[index]==="["){
       index++;
-      const value=addition();
-      if(tokens[index++]!==")") throw new Error("Schließende Klammer fehlt.");
-      return token.toLowerCase()==="sin"?Math.sin(value):Math.cos(value);
+      const arrayIndex=addition();
+      if(tokens[index++]!=="]") throw new Error("Schließende Array-Klammer fehlt.");
+      return Number(getArrayElement(name,arrayIndex));
     }
-    return Number(getVariable(token));
+    if(tokens[index]==="("){
+      index++;
+      const args=[];
+      if(tokens[index]!==")"){
+        while(true){
+          args.push(addition());
+          if(tokens[index]===","){index++;continue;}
+          break;
+        }
+      }
+      if(tokens[index++]!==")") throw new Error("Schließende Funktionsklammer fehlt.");
+      if(name==="sin"||name==="cos"){
+        if(args.length!==1) throw new Error(name+" benötigt genau einen Parameter.");
+        return name==="sin"?Math.sin(args[0]):Math.cos(args[0]);
+      }
+      return Number(callFunction(name,args));
+    }
+    const value=getVariable(name);
+    if(Array.isArray(value)) throw new Error("Ein Array benötigt einen Index: "+name+"[0]");
+    return Number(value);
   }
   function power(){
     const value=primary();
-    if(tokens[index]==="^"){
-      index++;
-      return Math.pow(value,power());
-    }
+    if(tokens[index]==="^"){index++;return Math.pow(value,power());}
     return value;
   }
   function multiplication(){
@@ -668,6 +651,135 @@ function evaluateMathExpression(source){
   if(index!==tokens.length||!Number.isFinite(result)) throw new Error("Ungültiger mathematischer Ausdruck: "+source);
   return result;
 }
+
+function stripOuterParentheses(source){
+  let text=String(source).trim();
+  while(text[0]==="("&&text[text.length-1]===")"){
+    let depth=0,wraps=true;
+    for(let i=0;i<text.length;i++){
+      if(text[i]==="(") depth++;
+      if(text[i]===")") depth--;
+      if(depth===0&&i<text.length-1){wraps=false;break;}
+    }
+    if(!wraps) break;
+    text=text.slice(1,-1).trim();
+  }
+  return text;
+}
+
+function splitLogicalExpression(source,operator){
+  let depth=0;
+  for(let i=0;i<source.length-1;i++){
+    if(source[i]==="(") depth++;
+    else if(source[i]===")") depth--;
+    else if(depth===0&&source.slice(i,i+2)===operator) return [source.slice(0,i).trim(),source.slice(i+2).trim()];
+  }
+  return null;
+}
+
+function findComparisonOperator(source){
+  let depth=0;
+  for(let i=0;i<source.length;i++){
+    const character=source[i];
+    if(character==="("){depth++;continue;}
+    if(character===")"){depth--;continue;}
+    if(depth!==0) continue;
+    const pair=source.slice(i,i+2);
+    if(pair==="=="||pair==="!="||pair===">="||pair==="<=") return {index:i,operator:pair};
+    if(character===">"||character==="<"||character==="=") return {index:i,operator:character};
+  }
+  return null;
+}
+
+function evaluateBooleanExpression(source){
+  const text=stripOuterParentheses(source);
+  if(!text) throw new Error("Die Bedingung ist leer.");
+  const orParts=splitLogicalExpression(text,"||");
+  if(orParts) return evaluateBooleanExpression(orParts[0])||evaluateBooleanExpression(orParts[1]);
+  const andParts=splitLogicalExpression(text,"&&");
+  if(andParts) return evaluateBooleanExpression(andParts[0])&&evaluateBooleanExpression(andParts[1]);
+  if(text[0]==="!"&&text[1]!=="=") return !evaluateBooleanExpression(text.slice(1));
+  if(/^true$/i.test(text)) return true;
+  if(/^false$/i.test(text)) return false;
+  const comparison=findComparisonOperator(text);
+  if(comparison){
+    const left=parseValue(text.slice(0,comparison.index));
+    const right=parseValue(text.slice(comparison.index+comparison.operator.length));
+    switch(comparison.operator){
+      case "=":
+      case "==": return left===right;
+      case "!=": return left!==right;
+      case ">": return left>right;
+      case "<": return left<right;
+      case ">=": return left>=right;
+      case "<=": return left<=right;
+    }
+  }
+  return Boolean(parseValue(text));
+}
+
+function executeFunctionStatements(nodes){
+  for(const node of nodes){
+    if(!node) continue;
+    if(node.type==="sequence"||node.type==="block"){
+      const nested=executeFunctionStatements(node.body);
+      if(nested.returned) return nested;
+      continue;
+    }
+    if(node.type==="return") return {returned:true,value:resolveCompiledToken(compileToken(node.value))};
+    if(node.type==="declare"){defineVariable(node.name,node.value);continue;}
+    if(node.type==="declareExpr"){defineVariable(node.name,resolveCompiledToken(compileToken(node.value)));continue;}
+    if(node.type==="arrayDeclare"){
+      const size=resolveCompiledToken(compileToken(node.size));
+      if(!Number.isInteger(size)||size<0||size>100000) throw new Error("Ungültige Array-Größe.");
+      defineVariable(node.name,new Array(size).fill(0));
+      continue;
+    }
+    if(node.type==="arrayAssign"){
+      setArrayElement(node.name,resolveCompiledToken(compileToken(node.index)),resolveCompiledToken(compileToken(node.value)),node.operator);
+      continue;
+    }
+    if(node.type==="assign"){
+      const oldValue=getVariable(node.name),next=resolveCompiledToken(compileToken(node.value));
+      let result=next;
+      if(node.operator==="+=") result=oldValue+next;
+      if(node.operator==="-=") result=oldValue-next;
+      if(node.operator==="*=") result=oldValue*next;
+      if(node.operator==="/="){if(next===0) throw new Error("Division durch null.");result=oldValue/next;}
+      setVariable(node.name,result);
+      continue;
+    }
+    if(node.type==="if"){
+      const branch=evaluateCompiledCondition(compileCondition(node.condition))?node.body:(node.elseBody||[]);
+      const nested=executeFunctionStatements(branch);
+      if(nested.returned) return nested;
+      continue;
+    }
+    throw new Error("Dieser Befehl wird innerhalb einer Funktion nicht unterstützt.");
+  }
+  return {returned:false,value:undefined};
+}
+
+function callFunction(name,args){
+  const key=String(name).toLowerCase();
+  const definition=functionDefinitions[key];
+  if(!definition) throw new Error("Funktion nicht definiert: "+key);
+  if(args.length!==definition.params.length) throw new Error("Funktion "+key+" erwartet "+definition.params.length+" Parameter.");
+  if(functionCallDepth>=100) throw new Error("Maximale Funktionstiefe überschritten.");
+  const scope=Object.create(null);
+  definition.params.forEach((parameter,index)=>scope[parameter]=args[index]);
+  functionScopes.push(scope);
+  functionCallDepth++;
+  try{
+    const result=executeFunctionStatements(definition.body);
+    if(!result.returned) throw new Error("Funktion "+key+" benötigt einen return-Wert.");
+    return result.value;
+  }finally{
+    functionCallDepth--;
+    functionScopes.pop();
+  }
+}
+
 function resolveCompiledToken(compiled){
   switch(compiled.kind){
     case "num":
@@ -687,47 +799,14 @@ function resolveCompiledToken(compiled){
 }
 
 function compileCondition(raw){
-  const token = String(raw).trim();
-
-  if(/^true$/i.test(token)) return {mode:"literal",data:true};
-  if(/^false$/i.test(token)) return {mode:"literal",data:false};
-
-  const match = token.match(
-    /^([a-z_$][a-z_$]*)\s*(==|=|!=|>=|<=|>|<)\s*([a-z_$][a-z_$]*|[-+]?(?:\d+(?:\.\d*)?|\.\d+)|(?:sin|cos)\s*\([^()]+\)|true|false)$/i
-  );
-
-  if(!match){
-    return {mode:"error",data:token};
-  }
-
-  return {
-    mode:"compare",
-    leftName:match[1].toLowerCase(),
-    operator:match[2],
-    right:compileToken(match[3])
-  };
+  return {mode:"expression",data:String(raw).trim()};
 }
 
 function evaluateCompiledCondition(compiled){
+  if(compiled.mode==="expression") return evaluateBooleanExpression(compiled.data);
   if(compiled.mode==="literal") return compiled.data;
-
-  if(compiled.mode==="error"){
-    throw new Error("Ungültige Bedingung: "+compiled.data);
-  }
-
-  const left = getVariable(compiled.leftName);
-  const right = resolveCompiledToken(compiled.right);
-
-  switch(compiled.operator){
-    case "=":
-    case "==": return left===right;
-    case "!=": return left!==right;
-    case ">": return left>right;
-    case "<": return left<right;
-    case ">=": return left>=right;
-    case "<=": return left<=right;
-    default: return false;
-  }
+  if(compiled.mode==="error") throw new Error("Ungültige Bedingung: "+compiled.data);
+  throw new Error("Ungültige Bedingung.");
 }
 
 function decodeCompactPrefix(prefix,candidates){
@@ -931,6 +1010,41 @@ class ProgramParser{
     };
   }
 
+  readExpressionUntilBoundary(){
+    const start=this.position;
+    let parentheses=0,brackets=0;
+    while(this.position<this.source.length){
+      const character=this.source[this.position];
+      if(character==="(") parentheses++;
+      else if(character===")") parentheses--;
+      else if(character==="[") brackets++;
+      else if(character==="]") brackets--;
+      if(parentheses===0&&brackets===0&&/[;\n\r{}]/.test(character)) break;
+      this.position++;
+    }
+    return this.source.slice(start,this.position).trim();
+  }
+
+  parseFunction(){
+    const header=this.rest().match(/^(?:function|fn)\s+([a-z_$][a-z_$]*)\s*\(/i);
+    if(!header) return null;
+    const name=header[1].toLowerCase();
+    this.position+=header[0].length;
+    const start=this.position;
+    let depth=1;
+    while(this.position<this.source.length&&depth>0){
+      const character=this.source[this.position++];
+      if(character==="(") depth++;
+      if(character===")") depth--;
+    }
+    if(depth!==0) throw new Error("Funktionsparameter: schließende Klammer fehlt.");
+    const parameterText=this.source.slice(start,this.position-1).trim();
+    const params=parameterText?parameterText.split(",").map(value=>value.trim().toLowerCase()):[];
+    if(params.some(value=>! /^[a-z_$][a-z_$]*$/i.test(value))||new Set(params).size!==params.length) throw new Error("Ungültige oder doppelte Funktionsparameter.");
+    this.skipSpace();
+    return {type:"functionDef",name,params,body:this.readBlock()};
+  }
+
   readBlock(){
     this.skipSpace();
 
@@ -959,7 +1073,15 @@ class ProgramParser{
         return nodes;
       }
 
-      nodes.push(this.parseStatement());
+      const sourceLine=this.source.slice(0,this.position).split(/\r?\n/).length;
+      try{
+        const node=this.parseStatement();
+        if(node&&typeof node==="object"&&node.sourceLine===undefined) node.sourceLine=sourceLine;
+        nodes.push(node);
+      }catch(error){
+        if(!error.blocklangLine){error.message="Zeile "+sourceLine+": "+error.message;error.blocklangLine=true;}
+        throw error;
+      }
     }
 
     if(expectClose){
@@ -1105,122 +1227,47 @@ class ProgramParser{
     const remaining = this.rest();
     let match;
 
-    match = remaining.match(/^(?:goto|move)\s*/i);
-
+    match = remaining.match(/^(?:pencolor|color)\s*/i);
     if(match){
-      const start=this.position+match[0].length;
-      let comma=-1;
-      let depth=0;
-      for(let i=start;i<this.source.length;i++){
-        const ch=this.source[i];
-        if(ch==="(") depth++;
-        if(ch===")"){
-          depth--;
-          if(depth<0) throw new Error("Unerwartete schließende Klammer.");
-        }
-        if(ch===","&&depth===0){comma=i;break;}
-        if(/[;\n\r{}]/.test(ch)&&depth===0) break;
-      }
-      if(comma<0) throw new Error("goto benötigt zwei Zahlenwerte, getrennt durch ein Komma.");
-      let end=comma+1;
-      depth=0;
-      while(end<this.source.length){
-        const ch=this.source[end];
-        if(ch==="(") depth++;
-        if(ch===")"){
-          depth--;
-          if(depth<0) throw new Error("Unerwartete schließende Klammer.");
-        }
-        if(/[;\n\r{}]/.test(ch)&&depth===0) break;
-        end++;
-      }
-      const first=this.source.slice(start,comma).trim();
-      const second=this.source.slice(comma+1,end).trim();
-      if(!first||!second) throw new Error("goto benötigt zwei Zahlenwerte.");
-      this.position=end;
-      return {type:"command",command:"goto",args:[first,second]};
+      this.position+=match[0].length;
+      const value=this.readExpressionUntilBoundary();
+      if(!value) throw new Error("pencolor benötigt einen Wert.");
+      return {type:"command",command:"color",args:[value]};
     }
 
-    match = remaining.match(
-      /^(?:pencolor|color)\s*([-+]?(?:\d+(?:\.\d*)?|\.\d+)|[a-z_$][a-z_$]*)/i
-    );
-
+    match = remaining.match(/^(?:thickness|penwidth|pensize)\s*/i);
     if(match){
-      this.position += match[0].length;
-
-      return {
-        type:"command",
-        command:"color",
-        args:[match[1]]
-      };
+      this.position+=match[0].length;
+      const value=this.readExpressionUntilBoundary();
+      if(!value) throw new Error("pensize benötigt einen Wert.");
+      return {type:"command",command:"thickness",args:[value]};
     }
 
-    match = remaining.match(
-      /^(?:thickness|penwidth|pensize)\s*([-+]?\d+(?:\.\d*)?)/i
-    );
-
+    match = remaining.match(/^(penoff|penon|clear|stop|cls|break|continue)/i);
     if(match){
-      this.position += match[0].length;
-
-      return {
-        type:"command",
-        command:"thickness",
-        args:[Number(match[1])]
-      };
-    }
-
-    match = remaining.match(/^(penoff|penon|clear|stop|cls|break)/i);
-
-    if(match){
-      this.position += match[0].length;
-
-      return {
-        type:"command",
-        command:match[1].toLowerCase(),
-        args:[]
-      };
+      this.position+=match[0].length;
+      return {type:"command",command:match[1].toLowerCase(),args:[]};
     }
 
     if(/^print/i.test(remaining)){
-      this.position += 5;
+      this.position+=5;
       this.skipSpace();
-
-      let value = "";
-
-      if(this.source[this.position]==='"'){
-        this.position++;
-        const end = this.source.indexOf('"',this.position);
-
-        if(end<0){
-          throw new Error("Bei print fehlt das schließende Anführungszeichen.");
-        }
-
-        value = this.source.slice(this.position,end);
-        this.position = end+1;
-      }else if(this.source[this.position]==="'"){
-        this.position++;
-        const end = this.source.indexOf("'",this.position);
-
-        if(end<0){
-          throw new Error("Bei print fehlt das schließende Anführungszeichen.");
-        }
-
-        value = this.source.slice(this.position,end);
-        this.position = end+1;
+      let value="";
+      let literal=false;
+      if(this.source[this.position]==='"'||this.source[this.position]==="'"){
+        literal=true;
+        const quote=this.source[this.position++];
+        const end=this.source.indexOf(quote,this.position);
+        if(end<0) throw new Error("Bei print fehlt das schließende Anführungszeichen.");
+        value=this.source.slice(this.position,end);
+        this.position=end+1;
       }else{
-        let end = this.position;
-
-        while(end<this.source.length &&
-          !/[;\n\r{}]/.test(this.source[end])){
-          end++;
-        }
-
-        value = this.source.slice(this.position,end).trim();
-        this.position = end;
+        value=this.readExpressionUntilBoundary();
       }
-
-      return {type:"command",command:"print",args:[value]};
+      return {type:"command",command:"print",args:[value],literal};
     }
+
+
 
     return null;
   }
@@ -1247,22 +1294,47 @@ class ProgramParser{
       return {type:"empty"};
     }
 
-    const waitCommand = this.rest().match(
-      /^wait[ \t]*([-+]?(?:\d+(?:\.\d*)?|\.\d+))(?=$|[\s;{}])/i
-    );
+    const functionNode=this.parseFunction();
+    if(functionNode) return functionNode;
 
-    if(waitCommand){
-      this.position += waitCommand[0].length;
-
-      return {
-        type:"command",
-        command:"wait",
-        args:[Number(waitCommand[1])]
-      };
+    const returnCommand=this.rest().match(/^return\b/i);
+    if(returnCommand){
+      this.position+=returnCommand[0].length;
+      const value=this.readExpressionUntilBoundary();
+      if(!value) throw new Error("return benötigt einen Wert.");
+      return {type:"return",value};
     }
 
-    if(/^wait(?:$|[ \t])/i.test(this.rest())){
-      throw new Error("wait benötigt eine Millisekunden-Zahl, zum Beispiel wait 1000.");
+    const explicitDeclaration=this.rest().match(/^(?:let|var)\s+([a-z_$][a-z_$]*)\s*=\s*/i);
+    if(explicitDeclaration){
+      this.position+=explicitDeclaration[0].length;
+      const value=this.readExpressionUntilBoundary();
+      if(!value) throw new Error("Deklaration benötigt einen Startwert.");
+      return {type:"declareExpr",name:explicitDeclaration[1].toLowerCase(),value};
+    }
+
+    const arrayDeclaration=this.rest().match(/^array\s+([a-z_$][a-z_$]*)\s*\[/i);
+    if(arrayDeclaration){
+      this.position+=arrayDeclaration[0].length;
+      const start=this.position;
+      let depth=1;
+      while(this.position<this.source.length&&depth>0){
+        const character=this.source[this.position++];
+        if(character==="[") depth++;
+        if(character==="]") depth--;
+      }
+      if(depth!==0) throw new Error("Array-Deklaration: schließende Klammer fehlt.");
+      const size=this.source.slice(start,this.position-1).trim();
+      if(!size) throw new Error("Array benötigt eine Größe.");
+      return {type:"arrayDeclare",name:arrayDeclaration[1].toLowerCase(),size};
+    }
+
+    const waitCommand=this.rest().match(/^wait(?=$|[\s(+\-.\d])/i);
+    if(waitCommand){
+      this.position+=waitCommand[0].length;
+      const duration=this.readExpressionUntilBoundary();
+      if(!duration) throw new Error("wait benötigt eine Millisekunden-Zahl, zum Beispiel wait 1000.");
+      return {type:"command",command:"wait",args:[duration]};
     }
 
     const compactControl = this.parseCompactControlPrefix();
@@ -1320,6 +1392,30 @@ class ProgramParser{
         : {type:"sequence",body:declarations};
     }
 
+    const arrayAssignment=this.rest().match(/^([a-z_$][a-z_$]*)\s*\[/i);
+    if(arrayAssignment){
+      const name=arrayAssignment[1].toLowerCase();
+      this.position+=arrayAssignment[0].length;
+      const indexStart=this.position;
+      let depth=1;
+      while(this.position<this.source.length&&depth>0){
+        const character=this.source[this.position++];
+        if(character==="[") depth++;
+        if(character==="]") depth--;
+      }
+      if(depth!==0) throw new Error("Array-Zuweisung: schließende Klammer fehlt.");
+      const index=this.source.slice(indexStart,this.position-1).trim();
+      this.skipSpace();
+      const operatorMatch=this.rest().match(/^(\+=|-=|\*=|\/=|=)/);
+      if(operatorMatch){
+        this.position+=operatorMatch[0].length;
+        const value=this.readExpressionUntilBoundary();
+        if(!index||!value) throw new Error("Array-Zuweisung benötigt Index und Wert.");
+        return {type:"arrayAssign",name,index,operator:operatorMatch[0],value};
+      }
+      throw new Error("Ein Array-Zugriff als Befehl benötigt eine Zuweisung.");
+    }
+
     const command = this.readSimpleCommand();
 
     if(command){
@@ -1375,19 +1471,12 @@ class ProgramParser{
       };
     }
 
-    match = this.rest().match(
-      /^([a-z_$][a-z_$]*)(\+=|-=|\*=|\/=|=)([^\s;{}]+)/i
-    );
-
+    match = this.rest().match(/^([a-z_$][a-z_$]*)(\+=|-=|\*=|\/=|=)/i);
     if(match){
-      this.position += match[0].length;
-
-      return {
-        type:"assign",
-        name:match[1].toLowerCase(),
-        operator:match[2],
-        value:match[3]
-      };
+      this.position+=match[0].length;
+      const value=this.readExpressionUntilBoundary();
+      if(!value) throw new Error("Zuweisung benötigt einen Wert.");
+      return {type:"assign",name:match[1].toLowerCase(),operator:match[2],value};
     }
 
     const unknown = this.rest().match(/^[^\s;{}]+/);
@@ -1407,21 +1496,26 @@ class ProgramParser{
 
 async function executeNodes(nodes){
   for(const node of nodes){
-    if(stopped||breakRequested) return;
-
+    if(stopped||breakRequested||continueRequested) return;
     executionSteps++;
-
     if(executionSteps%100===0){
       await fastYield();
-      if(stopped||breakRequested) return;
+      if(stopped||breakRequested||continueRequested) return;
     }
-
-    await executeNode(node);
+    try{
+      await executeNode(node);
+    }catch(error){
+      if(!error.blocklangLine&&node&&node.sourceLine){
+        error.message="Zeile "+node.sourceLine+": "+error.message;
+        error.blocklangLine=true;
+      }
+      throw error;
+    }
   }
 }
 
 async function executeNode(node){
-  if(stopped||breakRequested||!node) return;
+  if(stopped||breakRequested||continueRequested||!node) return;
 
   switch(node.type){
     case "empty":
@@ -1436,12 +1530,41 @@ async function executeNode(node){
       return;
 
     case "declare":
-      if(isKeyPressName(node.name)||node.name==="x"||node.name==="y"){
-        throw new Error("Diese Werte sind schreibgeschützt.");
-      }
-      variables[node.name] = node.value;
+      defineVariable(node.name,node.value);
       addOutput(node.name+" = "+node.value);
       return;
+
+    case "declareExpr":{
+      const value=resolveCompiledToken(compileToken(node.value));
+      defineVariable(node.name,value);
+      addOutput(node.name+" = "+value);
+      return;
+    }
+
+    case "arrayDeclare":{
+      const size=resolveCompiledToken(compileToken(node.size));
+      if(!Number.isInteger(size)||size<0||size>100000) throw new Error("Array-Größe muss eine ganze Zahl zwischen 0 und 100000 sein.");
+      defineVariable(node.name,new Array(size).fill(0));
+      addOutput(node.name+" = Array["+size+"]");
+      return;
+    }
+
+    case "arrayAssign":{
+      if(!node._compiledIndex) node._compiledIndex=compileToken(node.index);
+      if(!node._compiledValue) node._compiledValue=compileToken(node.value);
+      const index=resolveCompiledToken(node._compiledIndex);
+      const value=resolveCompiledToken(node._compiledValue);
+      const result=setArrayElement(node.name,index,value,node.operator);
+      addOutput(node.name+"["+index+"] = "+roundNumber(Number(result)));
+      return;
+    }
+
+    case "functionDef":
+      functionDefinitions[node.name]=node;
+      return;
+
+    case "return":
+      throw new Error("return kann nur innerhalb einer Funktion verwendet werden.");
 
     case "assign":{
       const oldValue = getVariable(node.name);
@@ -1500,7 +1623,7 @@ async function executeNode(node){
 
       let iterations = 0;
 
-      while(!stopped&&evaluateCompiledCondition(node._compiledCondition)){
+      while(!stopped&&!breakRequested&&evaluateCompiledCondition(node._compiledCondition)){
         iterations++;
         loopDepth++;
 
@@ -1513,8 +1636,14 @@ async function executeNode(node){
         if(stopped) return;
 
         if(breakRequested){
-          breakRequested = false;
+          breakRequested=false;
           return;
+        }
+
+        if(continueRequested){
+          continueRequested=false;
+          if(iterations%50===0) await fastYield();
+          continue;
         }
 
         if(iterations%50===0){
@@ -1540,7 +1669,8 @@ async function executeCommand(node){
 
   switch(command){
     case "wait":{
-      const duration = Number(args[0]);
+      if(!node._compiledArgs) node._compiledArgs=[compileToken(args[0])];
+      const duration = Number(resolveCompiledToken(node._compiledArgs[0]));
 
       if(!Number.isFinite(duration)||duration<0){
         throw new Error("wait benötigt eine positive Millisekunden-Zahl.");
@@ -1579,7 +1709,8 @@ async function executeCommand(node){
       return;
 
     case "thickness":
-      setPenWidth(args[0]);
+      if(!node._compiledArgs) node._compiledArgs=[compileToken(args[0])];
+      setPenWidth(resolveCompiledToken(node._compiledArgs[0]));
       addOutput("thickness "+penWidth);
       return;
 
@@ -1607,31 +1738,33 @@ async function executeCommand(node){
       return;
 
     case "print":{
-      const value = String(args[0]??"");
-      const match = value.match(/^([a-z_$][a-z_$]*)$/i);
-
-      if(match){
-        const key = match[1].toLowerCase();
-
-        if(key==="x"||key==="y"){
-          addOutput(String(getVariable(key)));
-        }else if(Object.prototype.hasOwnProperty.call(variables,key)){
-          addOutput(String(variables[key]));
-        }else{
-          addOutput(value);
-        }
-      }else{
-        addOutput(value);
+      const value=String(args[0]??"");
+      if(node.literal){addOutput(value);return;}
+      const simple=value.match(/^([a-z_$][a-z_$]*)$/i);
+      if(simple){
+        const key=simple[1].toLowerCase();
+        if(key==="x"||key==="y"||Object.prototype.hasOwnProperty.call(variables,key)||functionScopes.some(scope=>Object.prototype.hasOwnProperty.call(scope,key))){
+          const result=getVariable(key);
+          addOutput(Array.isArray(result)?JSON.stringify(result):String(result));
+        }else addOutput(value);
+        return;
       }
-
+      if(!/[+\-*/^()[\]]/.test(value)&&!/^[a-z_$][a-z_$]*\s*\(/i.test(value)){addOutput(value);return;}
+      const result=resolveCompiledToken(compileToken(value));
+      addOutput(Array.isArray(result)?JSON.stringify(result):String(result));
       return;
     }
 
+
+
     case "break":
-      if(loopDepth===0){
-        throw new Error("break kann nur innerhalb einer Schleife verwendet werden.");
-      }
-      breakRequested = true;
+      if(loopDepth===0) throw new Error("break kann nur innerhalb einer Schleife verwendet werden.");
+      breakRequested=true;
+      return;
+
+    case "continue":
+      if(loopDepth===0) throw new Error("continue kann nur innerhalb einer Schleife verwendet werden.");
+      continueRequested=true;
       return;
 
     case "stop":
@@ -1656,7 +1789,11 @@ async function runProgram(source){
   outputLines = [];
   shouldClearConsole = false;
   breakRequested = false;
+  continueRequested = false;
   loopDepth = 0;
+  functionCallDepth = 0;
+  functionScopes.length = 0;
+  Object.keys(functionDefinitions).forEach(key=>delete functionDefinitions[key]);
 
   try{
     const parser = new ProgramParser(source);
