@@ -1669,24 +1669,48 @@ function findEnclosingLoop(source,position){
 function autoDeclareLoopVariables(){
   const info = getCurrentLineInfo();
   const beforeCursor = info.line.slice(0,info.cursor-info.lineStart);
+  const afterCursor = info.value.slice(info.cursor);
   const loop = findEnclosingLoop(info.value,info.lineStart);
 
   if(!loop) return false;
 
-  const statement = beforeCursor.trim();
-  const match = statement.match(
-    /^([a-z_$][a-z_$]*)(\+\+|--|\+=|-=|\*=|\/=|=)([a-z_$][a-z_$]*|[-+]?(?:\d+(?:\.\d*)?|\.\d+))?$/i
+  const statement = beforeCursor.trimStart();
+  const boundary = afterCursor[0];
+  const names = [];
+  let match = statement.match(
+    /^([a-z_$][a-z_$]*)(\+\+|--|\+=|-=|\*=|\/=|=)([-+]?(?:\d+(?:\.\d*)?|\.\d+))?$/i
   );
 
-  if(!match) return false;
+  if(match){
+    names.push(match[1]);
+  }else{
+    match = statement.match(
+      /^(?:goto|move)\s*([a-z_$][a-z_$]*)(?=,|[ \t;])/i
+    );
 
-  const names = [match[1].toLowerCase()];
-  if(match[3]&&/^[a-z_$][a-z_$]*$/i.test(match[3])){
-    names.push(match[3].toLowerCase());
+    if(match&&/[, \t;]/.test(boundary||"")){
+      names.push(match[1]);
+    }
+
+    match = statement.match(
+      /^([a-z_$][a-z_$]*)(\+\+|--|\+=|-=|\*=|\/=)\s*$/i
+    );
+
+    if(match) names.push(match[1]);
   }
 
+  const assignmentRight = statement.match(
+    /^[a-z_$][a-z_$]*\s*(?:\+=|-=|\*=|\/=|=)\s*([a-z_$][a-z_$]*)$/i
+  );
+
+  if(assignmentRight&&/[ \t;,{}]/.test(boundary||"")){
+    names.push(assignmentRight[1]);
+  }
+
+  if(!names.length) return false;
+
   const declared = getDeclaredNames(info.value.slice(0,info.lineStart));
-  const missing = [...new Set(names)].filter(name=>
+  const missing = [...new Set(names.map(name=>name.toLowerCase()))].filter(name=>
     name!=="x"&&name!=="y"&&!isKeyPressName(name)&&!declared.has(name)
   );
 
@@ -1694,20 +1718,10 @@ function autoDeclareLoopVariables(){
 
   const declaration = missing.map(name=>name+"0").join("");
   const newline = info.value.indexOf("\n",loop.openIndex);
-
-  if(newline<0){
-    const insertion = "\n"+loop.indent+"\t"+declaration+"\n"+loop.indent+"\t";
-    editor.value =
-      info.value.slice(0,loop.openIndex+1)+
-      insertion+
-      info.value.slice(loop.openIndex+1);
-    const shift = insertion.length;
-    editor.selectionStart = editor.selectionEnd = info.cursor+shift;
-    return true;
-  }
-
-  const insertionPoint = newline+1;
-  const insertion = loop.indent+"\t"+declaration+"\n";
+  const insertionPoint = newline<0?loop.openIndex+1:newline+1;
+  const insertion = newline<0
+    ? "\n"+loop.indent+"\t"+declaration+"\n"+loop.indent+"\t"
+    : loop.indent+"\t"+declaration+"\n";
 
   editor.value =
     info.value.slice(0,insertionPoint)+
@@ -1717,7 +1731,6 @@ function autoDeclareLoopVariables(){
   editor.selectionStart = editor.selectionEnd = info.cursor+insertion.length;
   return true;
 }
-
 function autoDeclareAssignmentVariable(){
   const info = getCurrentLineInfo();
 
@@ -1952,13 +1965,32 @@ document.addEventListener("visibilitychange",()=>{
 editor.addEventListener("keydown",event=>{
   if(event.key==="Tab"){
     event.preventDefault();
-    completeBlockWithTab();
+    if(!autoDeclareLoopVariables()){
+      completeBlockWithTab();
+    }
     return;
   }
 
   if(event.key==="Enter"&&(event.ctrlKey||event.metaKey)){
     event.preventDefault();
     runProgram(editor.value);
+    return;
+  }
+
+  if(event.key==="Enter"){
+    event.preventDefault();
+    const info = getCurrentLineInfo();
+    const before = info.value.slice(0,info.cursor);
+    let depth = 0;
+
+    for(const character of before){
+      if(character==="{") depth++;
+      if(character==="}") depth=Math.max(0,depth-1);
+    }
+
+    const indent = "\t".repeat(depth);
+    insertEditorText("\n"+indent,info.cursor+1+indent.length);
+    editor.focus();
   }
 });
 
