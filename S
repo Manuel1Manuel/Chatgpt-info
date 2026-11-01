@@ -235,7 +235,7 @@ button:active{filter:brightness(.9)}
       <button id="stop">Stopp</button>
       <button id="copy-console">Konsole kopieren</button>
       <button id="copy-code">Code kopieren</button>
-      <span id="build-tools"><span id="build-version">06</span><button id="virtual-key-toggle" type="button" aria-label="Tastatur ein- oder ausblenden">T</button></span>
+      <span id="build-tools"><span id="build-version">07</span><button id="virtual-key-toggle" type="button" aria-label="Tastatur ein- oder ausblenden">T</button></span>
     </div>
 
     <div id="virtual-keyboard" hidden>
@@ -1736,8 +1736,10 @@ function getEnclosingLoops(source,position){
     if(character==="{"){
       const header = source.slice(segmentStart,i).trim();
 
-      if(/^(?:true|while\\s*.+)$/i.test(header)){
-        stack.push({openIndex:i});
+      if(/^(?:true|while\s*.+)$/i.test(header)){
+        const lineStart=source.lastIndexOf("\n",i-1)+1;
+        const indent=(source.slice(lineStart,i).match(/^[ \t]*/) || [""])[0];
+        stack.push({openIndex:i,indent});
       }else{
         stack.push(null);
       }
@@ -1754,11 +1756,11 @@ function getEnclosingLoops(source,position){
 
 function getLoopDeclarationLine(source,loop){
   const start = loop.openIndex+1;
-  let end = source.indexOf("\\n",start);
+  let end = source.indexOf("\n",start);
   if(end<0) end=source.length;
 
   const line = source.slice(start,end);
-  const match = line.match(/^([ \\t]*)((?:[a-z_$]+0)+)(?=\\s*(?:$|;))/i);
+  const match = line.match(/^([ \t]*)((?:[a-z_$]+0)+)(?=\s*(?:$|;))/i);
 
   if(!match) return null;
 
@@ -1773,7 +1775,7 @@ function getLoopDeclarationLine(source,loop){
 
 function moveLoopVariableDeclaration(direction){
   const info = getCurrentLineInfo();
-  const match = info.line.match(/^\\s*([a-z_$][a-z_$]*)\\s*(?:\\+\\+|--|\\+=|-=|\\*=|\\/=|=)/i);
+  const match = info.line.match(/^\s*([a-z_$][a-z_$]*)\s*(?:\+\+|--|\+=|-=|\*=|\/=|=)/i);
 
   if(!match) return false;
 
@@ -1828,14 +1830,11 @@ function moveLoopVariableDeclaration(direction){
     source=source.slice(0,target.start-target.indent.length)+updated+source.slice(target.end);
   }else{
     const insertAt=refreshedTarget.openIndex+1;
-    const lineEnd=source.indexOf("\\n",insertAt);
-    const indentMatch=source.slice(insertAt,lineEnd<0?source.length:lineEnd).match(/^([ \\t]*)/);
-    const indent=indentMatch?indentMatch[1]:"\\t";
-    const declaration=indent+name+"0";
-    if(lineEnd<0){
-      source=source.slice(0,insertAt)+"\\n"+declaration+"\\n"+source.slice(insertAt);
+    const declaration=refreshedTarget.indent+"\t"+name+"0";
+    if(source[insertAt]==="\n"){
+      source=source.slice(0,insertAt+1)+declaration+"\n"+source.slice(insertAt+1);
     }else{
-      source=source.slice(0,lineEnd+1)+declaration+"\\n"+source.slice(lineEnd+1);
+      source=source.slice(0,insertAt)+"\n"+declaration+"\n"+source.slice(insertAt);
     }
   }
 
