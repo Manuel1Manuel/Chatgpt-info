@@ -235,7 +235,7 @@ button:active{filter:brightness(.9)}
       <button id="stop">Stopp</button>
       <button id="copy-console">Konsole kopieren</button>
       <button id="copy-code">Code kopieren</button>
-      <span id="build-tools"><span id="build-version">15</span><button id="virtual-key-toggle" type="button" aria-label="Tastatur ein- oder ausblenden">T</button></span>
+      <span id="build-tools"><span id="build-version">16</span><button id="virtual-key-toggle" type="button" aria-label="Tastatur ein- oder ausblenden">T</button></span>
     </div>
 
     <div id="virtual-keyboard" hidden>
@@ -1381,6 +1381,7 @@ class ProgramParser{
     const returnCommand=this.rest().match(/^return\b/i);
     if(returnCommand){
       this.position+=returnCommand[0].length;
+      while(this.position<this.source.length&&/[ \t]/.test(this.source[this.position])) this.position++;
       const value=this.readExpressionUntilBoundary();
       if(!value) throw new Error("return benötigt einen Wert.");
       return {type:"return",value};
