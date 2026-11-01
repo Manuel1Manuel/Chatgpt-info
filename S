@@ -235,7 +235,7 @@ button:active{filter:brightness(.9)}
       <button id="stop">Stopp</button>
       <button id="copy-console">Konsole kopieren</button>
       <button id="copy-code">Code kopieren</button>
-      <span id="build-tools"><span id="build-version">08</span><button id="virtual-key-toggle" type="button" aria-label="Tastatur ein- oder ausblenden">T</button></span>
+      <span id="build-tools"><span id="build-version">09</span><button id="virtual-key-toggle" type="button" aria-label="Tastatur ein- oder ausblenden">T</button></span>
     </div>
 
     <div id="virtual-keyboard" hidden>
@@ -605,31 +605,69 @@ function evaluateCondition(condition){
 
 
 function compileToken(raw){
-  const token = String(raw).trim();
-  const functionMatch = token.match(/^(sin|cos)\s*\(([^()]+)\)$/i);
-
-  if(functionMatch){
-    return {
-      kind:"math",
-      operator:functionMatch[1].toLowerCase(),
-      argument:compileToken(functionMatch[2])
-    };
-  }
-
-  if(/^[-+]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(token)){
-    return {kind:"num",data:Number(token)};
-  }
-
+  const token=String(raw).trim();
+  if(/^[-+]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(token)) return {kind:"num",data:Number(token)};
   if(/^true$/i.test(token)) return {kind:"bool",data:true};
   if(/^false$/i.test(token)) return {kind:"bool",data:false};
-
-  if(/^[a-z_$][a-z_$]*$/i.test(token)){
-    return {kind:"var",data:token.toLowerCase()};
-  }
-
-  return {kind:"error",data:token};
+  if(/^[a-z_$][a-z_$]*$/i.test(token)) return {kind:"var",data:token.toLowerCase()};
+  return {kind:"mathExpression",data:token};
 }
 
+function evaluateMathExpression(source){
+  const tokens=String(source).match(/(?:\d+(?:\.\d*)?|\.\d+)|[a-z_$][a-z_$]*|[()+\-*/^]/gi)||[];
+  const compact=String(source).replace(/\s+/g,"");
+  if(tokens.join("").toLowerCase()!==compact.toLowerCase()) throw new Error("Ungültiger mathematischer Ausdruck: "+source);
+  let index=0;
+  function primary(){
+    const token=tokens[index++];
+    if(token===undefined) throw new Error("Unvollständiger mathematischer Ausdruck.");
+    if(token==="+") return primary();
+    if(token==="-") return -primary();
+    if(token==="("){
+      const value=addition();
+      if(tokens[index++]!==")") throw new Error("Schließende Klammer fehlt.");
+      return value;
+    }
+    if(/^\d/.test(token)||/^\./.test(token)) return Number(token);
+    if(/^(sin|cos)$/i.test(token)&&tokens[index]==="("){
+      index++;
+      const value=addition();
+      if(tokens[index++]!==")") throw new Error("Schließende Klammer fehlt.");
+      return token.toLowerCase()==="sin"?Math.sin(value):Math.cos(value);
+    }
+    return Number(getVariable(token));
+  }
+  function power(){
+    const value=primary();
+    if(tokens[index]==="^"){
+      index++;
+      return Math.pow(value,power());
+    }
+    return value;
+  }
+  function multiplication(){
+    let value=power();
+    while(tokens[index]==="*"||tokens[index]==="/"){
+      const op=tokens[index++];
+      const right=power();
+      if(op==="/"&&right===0) throw new Error("Division durch null.");
+      value=op==="*"?value*right:value/right;
+    }
+    return value;
+  }
+  function addition(){
+    let value=multiplication();
+    while(tokens[index]==="+"||tokens[index]==="-"){
+      const op=tokens[index++];
+      const right=multiplication();
+      value=op==="+"?value+right:value-right;
+    }
+    return value;
+  }
+  const result=addition();
+  if(index!==tokens.length||!Number.isFinite(result)) throw new Error("Ungültiger mathematischer Ausdruck: "+source);
+  return result;
+}
 function resolveCompiledToken(compiled){
   switch(compiled.kind){
     case "num":
@@ -637,6 +675,8 @@ function resolveCompiledToken(compiled){
       return compiled.data;
     case "var":
       return getVariable(compiled.data);
+    case "mathExpression":
+      return evaluateMathExpression(compiled.data);
     case "math":{
       const value = resolveCompiledToken(compiled.argument);
       return compiled.operator==="sin"?Math.sin(value):Math.cos(value);
@@ -1065,18 +1105,40 @@ class ProgramParser{
     const remaining = this.rest();
     let match;
 
-    match = remaining.match(
-      /^(?:goto|move)\s*([-+]?(?:\d+(?:\.\d*)?|\.\d+)|[a-z_$][a-z_$]*)\s*,\s*([-+]?(?:\d+(?:\.\d*)?|\.\d+)|[a-z_$][a-z_$]*)/i
-    );
+    match = remaining.match(/^(?:goto|move)\s*/i);
 
     if(match){
-      this.position += match[0].length;
-
-      return {
-        type:"command",
-        command:"goto",
-        args:[match[1],match[2]]
-      };
+      const start=this.position+match[0].length;
+      let comma=-1;
+      let depth=0;
+      for(let i=start;i<this.source.length;i++){
+        const ch=this.source[i];
+        if(ch==="(") depth++;
+        if(ch===")"){
+          depth--;
+          if(depth<0) throw new Error("Unerwartete schließende Klammer.");
+        }
+        if(ch===","&&depth===0){comma=i;break;}
+        if(/[;\n\r{}]/.test(ch)&&depth===0) break;
+      }
+      if(comma<0) throw new Error("goto benötigt zwei Zahlenwerte, getrennt durch ein Komma.");
+      let end=comma+1;
+      depth=0;
+      while(end<this.source.length){
+        const ch=this.source[end];
+        if(ch==="(") depth++;
+        if(ch===")"){
+          depth--;
+          if(depth<0) throw new Error("Unerwartete schließende Klammer.");
+        }
+        if(/[;\n\r{}]/.test(ch)&&depth===0) break;
+        end++;
+      }
+      const first=this.source.slice(start,comma).trim();
+      const second=this.source.slice(comma+1,end).trim();
+      if(!first||!second) throw new Error("goto benötigt zwei Zahlenwerte.");
+      this.position=end;
+      return {type:"command",command:"goto",args:[first,second]};
     }
 
     match = remaining.match(
@@ -1314,7 +1376,7 @@ class ProgramParser{
     }
 
     match = this.rest().match(
-      /^([a-z_$][a-z_$]*)(\+=|-=|\*=|\/=|=)([-+]?(?:\d+(?:\.\d*)?|\.\d+)|(?:sin|cos)\s*\([^()]+\)|[a-z_$][a-z_$]*|true|false)/i
+      /^([a-z_$][a-z_$]*)(\+=|-=|\*=|\/=|=)([^\s;{}]+)/i
     );
 
     if(match){
@@ -2139,7 +2201,13 @@ function completeBlockWithTab(){
   insertEditorText("\t");
 }
 
-editor.addEventListener("input",()=>{
+editor.addEventListener("input",event=>{
+  if(event.inputType==="insertText"&&event.data==="("){
+    const cursor=editor.selectionStart;
+    const value=editor.value;
+    if(value[cursor]!==")") editor.value=value.slice(0,cursor)+")"+value.slice(cursor);
+    editor.selectionStart=editor.selectionEnd=cursor;
+  }
   if(autoDeclareLoopVariables()) return;
 
   const insertedCondition = autoDeclareConditionVariable();
