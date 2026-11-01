@@ -235,7 +235,7 @@ button:active{filter:brightness(.9)}
       <button id="stop">Stopp</button>
       <button id="copy-console">Konsole kopieren</button>
       <button id="copy-code">Code kopieren</button>
-      <span id="build-tools"><span id="build-version">13</span><button id="virtual-key-toggle" type="button" aria-label="Tastatur ein- oder ausblenden">T</button></span>
+      <span id="build-tools"><span id="build-version">14</span><button id="virtual-key-toggle" type="button" aria-label="Tastatur ein- oder ausblenden">T</button></span>
     </div>
 
     <div id="virtual-keyboard" hidden>
@@ -582,7 +582,7 @@ function compileToken(raw){
 }
 
 function evaluateMathExpression(source){
-  const tokens=String(source).match(/(?:\d+(?:\.\d*)?|\.\d+)|[a-z_$][a-z0-9_$]*|[()+\-*/^\[\],]/gi)||[];
+  const tokens=String(source).match(/(?:\d+(?:\.\d*)?|\.\d+)|[a-z_$][a-z0-9_$]*|[()+\-*\/^\[\],]/gi)||[];
   const compact=String(source).replace(/\s+/g,"");
   if(tokens.join("").toLowerCase()!==compact.toLowerCase()) throw new Error("Ungültiger mathematischer Ausdruck: "+source);
   let index=0;
@@ -1068,7 +1068,7 @@ class ProgramParser{
         const rest=this.source.slice(next);
         const nextStatement=/^(?:goto|move|pencolor|color|thickness|penwidth|pensize|wait|print|penoff|penon|clear|stop|cls|break|continue|if|while|else|array|function|fn|let|var|true)\b/i.test(rest)||
           /^[a-z_$][a-z_$]*(?:\s*\[[^\]\n]+\])?\s*(?:\+\+|--|\+=|-=|\*=|\/=|=)/i.test(rest);
-        const operatorGap=/[=+\-*/^(,\[]/.test(previousCharacter)||/[+\-*/^(),\]]/.test(nextCharacter);
+        const operatorGap=/[=+\-*^(,\[]/.test(previousCharacter)||previousCharacter==="/"||/[+\-*^(),\]]/.test(nextCharacter)||nextCharacter==="/";
         const adjacentValues=/[a-z0-9_$)\]]/i.test(previousCharacter)&&/[a-z0-9_$.(]/i.test(nextCharacter)&&nextCharacter!=="(";
         if(nextStatement||(adjacentValues&&!operatorGap)) break;
         if(next===this.position) break;
@@ -1831,7 +1831,7 @@ async function executeCommand(node){
         }else addOutput(value);
         return;
       }
-      if(!/[+\-*/^()[\]]/.test(value)&&!/^[a-z_$][a-z_$]*\s*\(/i.test(value)){addOutput(value);return;}
+      if(!(value.includes("+")||value.includes("-")||value.includes("*")||value.includes("/")||value.includes("^")||value.includes("(")||value.includes(")")||value.includes("[")||value.includes("]"))&&!/^[a-z_$][a-z_$]*\s*\(/i.test(value)){addOutput(value);return;}
       const result=resolveCompiledToken(compileToken(value));
       addOutput(Array.isArray(result)?JSON.stringify(result):String(result));
       return;
