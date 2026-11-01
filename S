@@ -70,6 +70,14 @@ button:hover{filter:brightness(1.15)}
 button:active{filter:brightness(.9)}
 #run{background:var(--accent)}
 #stop{background:#a73737}
+#virtual-key-toggle{
+  min-width:27px;
+  width:27px;
+  height:27px;
+  padding:0;
+  font-weight:700;
+  background:var(--accent);
+}
 #build-version{
   display:flex;
   align-items:center;
@@ -119,6 +127,7 @@ button:active{filter:brightness(.9)}
 }
 .key-row-middle{padding:0 4%}
 .key-row-bottom{padding:0 12%}
+.key-row-controls button{min-height:36px;font-size:17px}
 #console{
   flex:0 0 120px;
   min-height:55px;
@@ -218,8 +227,8 @@ button:active{filter:brightness(.9)}
       <button id="stop">Stopp</button>
       <button id="copy-console">Konsole kopieren</button>
       <button id="copy-code">Code kopieren</button>
-      <span id="build-version">03</span>
-      <button id="virtual-key-toggle" type="button">Show Tastatur</button>
+      <span id="build-version">04</span>
+      <button id="virtual-key-toggle" type="button" aria-label="Tastatur ein- oder ausblenden">T</button>
     </div>
 
     <div id="virtual-keyboard" hidden>
@@ -235,9 +244,10 @@ button:active{filter:brightness(.9)}
       <div class="key-row key-row-bottom">
         <button type="button" data-key="z">Z</button><button type="button" data-key="x">X</button><button type="button" data-key="c">C</button><button type="button" data-key="v">V</button><button type="button" data-key="b">B</button><button type="button" data-key="n">N</button><button type="button" data-key="m">M</button>
       </div>
-    </div>
-
-    <pre id="console">bereit</pre>
+      <div class="key-row key-row-controls">
+        <button type="button" data-key="minus">−</button><button type="button" data-key="left">←</button><button type="button" data-key="down">↓</button><button type="button" data-key="up">↑</button><button type="button" data-key="right">→</button><button type="button" data-key="plus">+</button>
+      </div>
+    </div>    <pre id="console">bereit</pre>
 
     <div id="console-row">
       <input id="console-input" type="text" autocomplete="off" spellcheck="false">
@@ -274,7 +284,7 @@ let variables = Object.create(null);
 const pressedKeys = new Set();
 
 function isKeyPressName(name){
-  return /^[a-z0-9]press$/i.test(String(name));
+  return /^(?:[a-z0-9]|up|down|left|right|plus|minus)press$/i.test(String(name));
 }
 
 let px = 0;
@@ -2018,16 +2028,25 @@ editor.addEventListener("input",()=>{
   autoOpenBlockBeforeCommand();
 });
 
+function normalizeKey(key){
+  if(key==="ArrowUp") return "up";
+  if(key==="ArrowDown") return "down";
+  if(key==="ArrowLeft") return "left";
+  if(key==="ArrowRight") return "right";
+  if(key==="+") return "plus";
+  if(key==="-") return "minus";
+  if(key.length===1&&/^[a-z0-9]$/i.test(key)) return key.toLowerCase();
+  return null;
+}
+
 document.addEventListener("keydown",event=>{
-  if(event.key.length===1&&/^[a-z0-9]$/i.test(event.key)){
-    pressedKeys.add(event.key.toLowerCase());
-  }
+  const key = normalizeKey(event.key);
+  if(key) pressedKeys.add(key);
 });
 
 document.addEventListener("keyup",event=>{
-  if(event.key.length===1&&/^[a-z0-9]$/i.test(event.key)){
-    pressedKeys.delete(event.key.toLowerCase());
-  }
+  const key = normalizeKey(event.key);
+  if(key) pressedKeys.delete(key);
 });
 
 window.addEventListener("blur",()=>{
@@ -2040,7 +2059,7 @@ document.addEventListener("visibilitychange",()=>{
 
 virtualKeyToggle.addEventListener("click",()=>{
   virtualKeyboard.hidden = !virtualKeyboard.hidden;
-  virtualKeyToggle.textContent = virtualKeyboard.hidden?"Show Tastatur":"Tastatur ausblenden";
+  virtualKeyToggle.setAttribute("aria-label",virtualKeyboard.hidden?"Tastatur einblenden":"Tastatur ausblenden");
   if(virtualKeyboard.hidden){
     virtualKeyboard.querySelectorAll("[data-key]").forEach(key=>{
       pressedKeys.delete(key.dataset.key);
